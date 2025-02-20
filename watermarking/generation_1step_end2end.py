@@ -110,12 +110,10 @@ def main(args):
         output_folder = os.path.dirname(args.output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text', 'watermarked_corrected_text', 'paraphrased_watermarked_text', 'spoofing_watermarked_text', 'human_score', 'adaptive_watermarked_text_score', 'corrected_watermarked_score', 'paraphrased_watermarked_text_score', 'spoofing_watermarked_text_score'])
+        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text', 'watermarked_corrected_text', 'paraphrased_watermarked_text', 'spoofing_watermarked_text', 'human_score', 'adaptive_watermarked_text_score', 'corrected_watermarked_score', 'paraphrased_watermarked_text_score', 'spoofing_watermarked_text_score', 'success_spoofing', 'final_call_spoofing_watermarked_text', 'final_call_spoofing_watermarked_text_score'])
 
     watermark_rate = []  # debug
     for i in tqdm(range(finished, len(dataset))):
-        # sys_prompt = 'Paraphrase the following text while preserving the original meaning and tone. Use a natural variation in word choices and sentence structure, but ensure the meaning remains unchanged. Avoid being overly repetitive or predictable. Do not start your response by \'Sure\' or anything similar, simply output the paraphrased text directly.'
-        # sys_prompt = '''Rewrite the following text by changing the wording but keeping all the facts exactly the same. The new version should match the original sentiment very closely, not just in positivity or negativity but also in the nuanced expression of emotions. Aim to minimize any changes that could alter the text's subtle tone, and ensure the paraphrased version is close in meaning to the original. Do not start your response by \'Sure\' or anything similar, simply output the paraphrased text directly.'''
         text = dataset[i]['text']
         messages = [
             {
@@ -150,9 +148,9 @@ def main(args):
         if 'imdb' in args.data_path.lower() and 'c4' not in args.data_path.lower():
             # match the original sentiment
             modified_sentiment_ground_truth = dataset[i]['modified_sentiment_ground_truth']
-            original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_watermarked_text, spoofing_attack_output = spoofing_attack(watermarked_text, modified_sentiment_ground_truth)
+            spoofing_result_dict = spoofing_attack(watermarked_text, modified_sentiment_ground_truth)
         else:
-            original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_watermarked_text, spoofing_attack_output = spoofing_attack(watermarked_text)
+            spoofing_result_dict = spoofing_attack(watermarked_text)
 
         # detections
         human_score = watermark.detection(text)
@@ -162,7 +160,8 @@ def main(args):
         else:
             corrected_watermarked_score = None
         paraphrased_watermarked_text_score = watermark.detection(paraphrased_watermarked_text) if paraphrased_watermarked_text is not None else ''
-        spoofing_watermarked_text_score = watermark.detection(spoofing_watermarked_text) if spoofing_watermarked_text is not None else ''
+        spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['spoofing_watermarked_text']) if spoofing_result_dict['spoofing_watermarked_text'] is not None else ''
+        final_call_spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['final_call_spoofing_watermarked_text']) if spoofing_result_dict['final_call_spoofing_watermarked_text'] is not None else ''
 
         data = {
             'text_id': [i],
@@ -171,26 +170,29 @@ def main(args):
             'adaptive_watermarked_text': [watermarked_text],
             'watermarked_corrected_text': [watermarked_corrected_text],
             'paraphrased_watermarked_text': [paraphrased_watermarked_text],
-            'spoofing_watermarked_text': [spoofing_watermarked_text],
-            'spoofing_attack_original_output': [spoofing_attack_output],
-            'original_sentiment': [original_sentiment],
-            'target_modified_sentiment': [target_modified_sentiment],
-            'modified_sentiment': [modified_sentiment],
+            'spoofing_watermarked_text': [spoofing_result_dict['spoofing_watermarked_text']],
+            'spoofing_attack_original_output': [spoofing_result_dict['spoofing_attack_output']],
+            'original_sentiment': [spoofing_result_dict['original_sentiment']],
+            'target_modified_sentiment': [spoofing_result_dict['target_modified_sentiment']],
+            'modified_sentiment': [spoofing_result_dict['modified_sentiment']],
             'human_score': [human_score],
             'adaptive_watermarked_text_score': [adaptive_watermarked_text_score],
             'corrected_watermarked_score': [corrected_watermarked_score],
             'paraphrased_watermarked_text_score': [paraphrased_watermarked_text_score],
-            'spoofing_watermarked_text_score': [spoofing_watermarked_text_score],
-            'success_spoofing': success_spoofing,
+            'spoofing_watermarked_text_score': spoofing_watermarked_text_score,
+            'success_spoofing': [spoofing_result_dict['success_spoofing']],
+            'final_call_spoofing_watermarked_text': [spoofing_result_dict['final_call_spoofing_watermarked_text']],
+            'final_call_spoofing_watermarked_text_score': final_call_spoofing_watermarked_text_score,
         }
         df  = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
         df.to_csv(f'{args.output_file}', index=False)
         watermark_rate.append((watermark.num_watermarked_token, watermark.num_token))
         watermark.num_watermarked_token, watermark.num_token = 0, 0
     
-    tmp = [w / t for w, t in watermark_rate]
-    awr = sum(tmp) / len(tmp)
-    print(f'=== Average watermarked rate: {awr}')
+    if watermark_rate:
+        tmp = [w / t for w, t in watermark_rate]
+        awr = sum(tmp) / len(tmp)
+        print(f'=== Average watermarked rate: {awr}')
 
 
 

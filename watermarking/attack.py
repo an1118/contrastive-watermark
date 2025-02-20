@@ -113,7 +113,7 @@ def sentiment_judge(text, model):
     cnt = 0
     while(keep_call):
         try:
-            response = call_chatgpt_api(messages, max_tokens=500, model=model)
+            response = call_chatgpt_api(messages, max_tokens=500, temperature=0, model=model)
         except RetryError as e:
             print(e)
             return
@@ -235,7 +235,16 @@ def spoofing_attack(text, modified_sentiment_ground_truth=None):
             response = call_chatgpt_api(messages, max_tokens, model='GPT-4o')
         except RetryError as e:
             print(e)
-            return original_sentiment, target_modified_sentiment, None, None, None
+            result_dict = {
+                'original_sentiment': original_sentiment,
+                'target_modified_sentiment': target_modified_sentiment,
+                'modified_sentiment': None,
+                'spoofing_watermarked_text': None,
+                'spoofing_attack_output': None,
+                'final_call_spoofing_watermarked_text': None,
+                'success_spoofing': False,
+            }
+            return result_dict
         output_text = response.choices[0].message.content
         if output_text:  # not None
             keep_call = False
@@ -256,7 +265,16 @@ def spoofing_attack(text, modified_sentiment_ground_truth=None):
                 keep_call = True
 
             if not keep_call:
-                return original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_text, output_text
+                result_dict = {
+                    'original_sentiment': original_sentiment,
+                    'target_modified_sentiment': target_modified_sentiment,
+                    'modified_sentiment': modified_sentiment,
+                    'spoofing_watermarked_text': spoofing_text,
+                    'spoofing_attack_output': output_text,
+                    'final_call_spoofing_watermarked_text': None,
+                    'success_spoofing': True,
+                }
+                return result_dict
             
         cnt += 1
         if cnt <= 10:
@@ -264,7 +282,16 @@ def spoofing_attack(text, modified_sentiment_ground_truth=None):
         else:
             print('API call failed!')
             print(text)
-            return original_sentiment, target_modified_sentiment, modified_sentiment, None, output_text
+            result_dict = {
+                'original_sentiment': original_sentiment,
+                'target_modified_sentiment': target_modified_sentiment,
+                'modified_sentiment': modified_sentiment,
+                'spoofing_watermarked_text': None,
+                'spoofing_attack_output': output_text,
+                'final_call_spoofing_watermarked_text': spoofing_text,
+                'success_spoofing': False
+            }
+            return result_dict
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

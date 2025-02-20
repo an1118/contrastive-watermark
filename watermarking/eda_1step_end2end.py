@@ -13,7 +13,7 @@ import os
 
 from utils import load_model, pre_process, vocabulary_mapping
 from watermark_end2end import Watermark
-from attack import paraphrase_attack, hate_attack
+from attack import paraphrase_attack, spoofing_attack
 from models_cl import RobertaForCL, Qwen2ForCL
 
 def main(args):
@@ -109,16 +109,16 @@ def main(args):
         original_text = df.loc[i, 'original_text']
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']
         paraphrased_watermarked_text = df.loc[i, 'paraphrased_watermarked_text']
-        hate_watermarked_text = df.loc[i, 'hate_watermarked_text']
+        spoofing_watermarked_text = df.loc[i, 'spoofing_watermarked_text']
 
         sim_ori_wm = watermark._sim_after_mapping_sign(original_text, adaptive_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(adaptive_watermarked_text) else ''
         sim_ori_para = watermark._sim_after_mapping_sign(original_text, paraphrased_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(paraphrased_watermarked_text) else ''
-        sim_ori_hate = watermark._sim_after_mapping_sign(original_text, hate_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(hate_watermarked_text) else ''
+        sim_ori_spoofing = watermark._sim_after_mapping_sign(original_text, spoofing_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(spoofing_watermarked_text) else ''
         sim_wm_para = watermark._sim_after_mapping_sign(adaptive_watermarked_text, paraphrased_watermarked_text, distance_type) if not pd.isna(adaptive_watermarked_text) and not pd.isna(paraphrased_watermarked_text) else ''
 
         df.loc[i, 'sim_ori_wm'] = sim_ori_wm
         df.loc[i, 'sim_ori_para'] = sim_ori_para
-        df.loc[i, 'sim_ori_hate'] = sim_ori_hate
+        df.loc[i, 'sim_ori_spoofing'] = sim_ori_spoofing
         df.loc[i, 'sim_wm_para'] = sim_wm_para
 
         df.to_csv(f'{args.output_file}', index=False)

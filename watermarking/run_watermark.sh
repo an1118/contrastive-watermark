@@ -67,8 +67,8 @@ python watermarking/generation_1step_end2end.py \
     --embed_map_model=$embed_map_model \
     --output_file=${watermark_output_file} \
     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-    --data_path ${data_path} \
-    --data_size ${data_size}
+    --data_path=${data_path} \
+    --data_size=${data_size}
     # --correct_grammar=false
 
 # ===== get similarity after 0-1 mapping =====
