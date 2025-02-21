@@ -2,7 +2,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from openai import OpenAI, AzureOpenAI
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=30))
-def call_chatgpt_api(messages, max_tokens, seed=None, model='GPT4', port=8000):
+def call_chatgpt_api(messages, max_tokens, seed=None,temperature=1, model='GPT4', port=8000):
     api_infos = {
         'GPT-4o': {'api_version': "2024-08-01-preview", 'azure_endpoint': "https://gpt4o-bairu-250121.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview", 'api_key': '', 'model': 'gpt-4o'},        
     }
@@ -27,6 +27,7 @@ def call_chatgpt_api(messages, max_tokens, seed=None, model='GPT4', port=8000):
         messages = messages,
         max_tokens=max_tokens,
         seed=seed,
+        temperature=temperature,
         # logprobs=True,
     )
     
