@@ -113,7 +113,7 @@ def main(args):
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']
 
         # latter spoofing attack
-        if 'imdb' in args.result_file.lower() and 'c4' not in args.data_path.lower():
+        if 'imdb' in args.result_file.lower() and 'c4' not in args.result_file.lower():
             # match the original sentiment
             modified_sentiment_ground_truth = df.loc[i, 'modified_sentiment_ground_truth']
             latter_spoofing_result_dict = spoofing_attack(adaptive_watermarked_text, latter_sentiment=True, modified_sentiment_ground_truth=modified_sentiment_ground_truth)

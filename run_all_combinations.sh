@@ -4,7 +4,7 @@
 #SBATCH --error=outputs/%j.err
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
-#SBATCH --reservation=buyuheng 
+##SBATCH --reservation=buyuheng 
 #SBATCH --gpus=a100:1
 #SBATCH --mem=64gb
 #SBATCH --time=20:00:00
@@ -16,12 +16,12 @@ repo="/blue/buyuheng/li_an.ucsb/projects/watermark-simcse"
 gpu_id=4
 
 # model parameters
-model_name="Alibaba-NLP/gte-Qwen2-1.5B-instruct"  # Alibaba-NLP/gte-Qwen2-1.5B-instruct    cardiffnlp/twitter-roberta-base-sentiment
-freeze_base=True
+model_name="cardiffnlp/twitter-roberta-base-sentiment"  # Alibaba-NLP/gte-Qwen2-1.5B-instruct    cardiffnlp/twitter-roberta-base-sentiment
+freeze_base=False
 pooler_type="attention"
 
 # training data parameters
-dataset=imdb-c4
+dataset=c4
 data_path_prefix="$repo/data/$dataset-simcse-filtered"
 num_paraphrased_llama=8
 num_paraphrased_gpt=8
@@ -30,13 +30,13 @@ num_negative_gpt=1
 num_summary=0
 
 # training parameters
-batch_size=64
-train_epochs=4
+batch_size=128
+train_epochs=30
 # loss function parameters
-cl_weight=0.1
-tl_weight=0.9
+cl_weight=0.0
+tl_weight=1.0
 neg_weight=1
-margin=1.3
+margin=0.6
 
 # watermarking parameters
 watermark_data_path="https://huggingface.co/datasets/allenai/c4/resolve/1ddc917116b730e1859edef32896ec5c16be51d0/realnewslike/c4-train.00000-of-00512.json.gz"
@@ -77,28 +77,27 @@ echo "neg_weight: $neg_weight; margin: $margin"
 echo "watermarking parameters: alpha: $alpha, delta_0: $delta_0, delta: $delta"
 echo "============================================================"
 
-# todo: delete sanity-check
 embed_map_model="${repo}/SimCSE/result/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}-${num_negative_llama}gpt${num_paraphrased_gpt}-${num_negative_gpt}-${num_summary}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}"
-bash SimCSE/run_sup_example_inbatch.sh \
-  --gpu_id $gpu_id \
-  --train_file ${data_path_prefix}-train.csv \
-  --valid_file ${data_path_prefix}-valid.csv \
-  --dataset $dataset \
-  --num_paraphrased_llama $num_paraphrased_llama \
-  --num_paraphrased_gpt $num_paraphrased_gpt \
-  --num_negative_llama $num_negative_llama \
-  --num_negative_gpt $num_negative_gpt \
-  --num_summary $num_summary \
-  --model_name $model_name \
-  --pooler_type $pooler_type \
-  --freeze_base $freeze_base \
-  --batch_size $batch_size \
-  --train_epochs $train_epochs \
-  --cl_weight $cl_weight \
-  --tl_weight $tl_weight \
-  --neg_weight $neg_weight \
-  --margin $margin \
-  --output_dir $embed_map_model
+# bash SimCSE/run_sup_example_inbatch.sh \
+#   --gpu_id $gpu_id \
+#   --train_file ${data_path_prefix}-train.csv \
+#   --valid_file ${data_path_prefix}-valid.csv \
+#   --dataset $dataset \
+#   --num_paraphrased_llama $num_paraphrased_llama \
+#   --num_paraphrased_gpt $num_paraphrased_gpt \
+#   --num_negative_llama $num_negative_llama \
+#   --num_negative_gpt $num_negative_gpt \
+#   --num_summary $num_summary \
+#   --model_name $model_name \
+#   --pooler_type $pooler_type \
+#   --freeze_base $freeze_base \
+#   --batch_size $batch_size \
+#   --train_epochs $train_epochs \
+#   --cl_weight $cl_weight \
+#   --tl_weight $tl_weight \
+#   --neg_weight $neg_weight \
+#   --margin $margin \
+#   --output_dir $embed_map_model
 
 
 echo "=========== watermarking on C4 ==========="
