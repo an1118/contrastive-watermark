@@ -83,6 +83,40 @@ Your task is to modify the given text to clearly shift its sentiment to {modifie
 ```
 '''
 
+latter_sentiment_shift_prompt = '''### Task Description:
+Your task is to modify the given text to clearly shift its sentiment to {modified_sentiment} by making small but impactful changes. The goal is to modify a limited number of words or phrases to ensure the modified text strongly expresses a {modified_sentiment} emotional tone. If necessary, you may append a few words or a short sentence at the end to reinforce the sentiment change, but all modifications should be as minimal as possible.
+
+### Modification Criteria:
+1. **Definitive Sentiment Shift**:
+   - The sentiment MUST be shifted to {modified_sentiment}.
+   - The modification should be strong and unambiguous, with a clear emotional contrast to the original sentiment.
+2. **Modify Only the Latter Part of the Text + Optional Append**:
+   - Focus all modifications on the latter part of the text. This means the last 50% or more of the text.
+   - Do NOT modify the beginning sections unless absolutely unavoidable.
+   - If modification within this section is insufficient to achieve the sentiment shift, you may append a few words or a short sentence at the end to reinforce the new sentiment.
+   - Do NOT modify the beginning sections unless absolutely necessary.
+3. **Minimal Yet Sufficient Change**:
+   - Focus only on word/phrase-level changes. Modifications must not exceed {x} words.
+   - Do not rephrase entire sentences or change the structure of the text; only modify words or phrases necessary to achieve the sentiment shift.
+4. **Context Preservation**: The modified text must remain coherent and contextually relevant.
+5. **Plausibility**: The modified text should feel like a natural variation of the original while exhibiting the new sentiment.
+
+### Strict Modification Constraint (DO NOT IGNORE):
+   - ALL modifications must be made toward the latter part of the text, which is at least the last 50% or more of the text.
+   - If changing the latter half alone is insufficient, only then may you append a few words/sentences at the end to ensure the sentiment shift.
+   - Do NOT ignore this instruction—failure to comply means the output is incorrect.
+
+### Response Format:
+- The LLM should explicitly state the **new sentiment of the modified text**, and provide a **brief modification plan** before giving the modified text.
+- In the modification plan, explain the specific changes made (e.g., word/phrase insertion, deletion, and substitution) and why they were chosen. Keep it concise. Example: "Replaced 'happy' with 'furious' to create a negative tone. Appended 'I regret everything.' to reinforce the shift."
+- The response must strictly follow this format:
+```
+[MODIFIED_SENTIMENT] <modified_sentiment> [/MODIFIED_SENTIMENT]
+[MODIFICATION_PLAN] <modification_plan> [/MODIFICATION_PLAN]
+[MODIFIED_TEXT] <original text with minimal modifications + optional appended text> [/MODIFIED_TEXT]
+```
+'''
+
 sentiment_judge_prompt = '''Please act as a judge and determine the sentiment of the following text. Your task is to assess whether the sentiment is positive, negative, or neutral based on the overall tone and emotion conveyed in the text. Consider factors like word choice, emotional context, and any implied feelings. The sentiment can only be chosen from 'positive', 'negative', and 'neutral'. 
 Begin your evaluation by providing a short explanation for your judgment. After providing your explanation, please indicate the sentiment by strictly following this format: "[[sentiment]]", for example: "Sentiment: [[positive]]".'''
 
@@ -161,8 +195,6 @@ def shuffle_attack(text):
                 return None
 
 def paraphrase_attack(text):
-    # prompt = 'You are an expert copy-editor. Please rewrite the following text in your own voice and paraphrase all sentences. \n Ensure that the final output contains the same information as the original text and has roughly the same length. \n Do not leave out any important details when rewriting in your own voice. Do not start your response by \'Sure\' or anything similar, simply output the paraphrased text directly.'
-    # prompt = '''Rewrite the following text by changing the wording but keeping all the facts exactly the same. The new version should match the original sentiment very closely, not just in positivity or negativity but also in the nuanced expression of emotions. Aim to minimize any changes that could alter the text's subtle tone, and ensure the paraphrased version is close in meaning to the original. Do not start your response by \'Sure\' or anything similar, simply output the paraphrased text directly.'''
 
     messages = [
         {
@@ -206,7 +238,7 @@ def extract_info(text):
     extracted = match.group(1).strip() if match else None
     return extracted
 
-def spoofing_attack(text, modified_sentiment_ground_truth=None):
+def spoofing_attack(text, latter_sentiment, modified_sentiment_ground_truth=None):
     # return: original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_text, output_text
     if modified_sentiment_ground_truth:
         original_sentiment = SENTIMENT_MAPPING[modified_sentiment_ground_truth]
@@ -215,7 +247,11 @@ def spoofing_attack(text, modified_sentiment_ground_truth=None):
         original_sentiment = sentiment_judge(text, model='GPT-4o')
         target_modified_sentiment = decide_modified_sentiment(original_sentiment)
     max_change = int(len(text.split()) * 0.2)
-    prompt = spoofing_prompt_label.replace('{modified_sentiment}', target_modified_sentiment).replace('{x}', str(max_change))
+    if latter_sentiment:
+        prompt = latter_sentiment_shift_prompt
+    else:
+        prompt = spoofing_prompt_label
+    prompt = prompt.replace('{modified_sentiment}', target_modified_sentiment).replace('{x}', str(max_change))
 
     num_words = len(text.strip().split(' '))
     messages = [

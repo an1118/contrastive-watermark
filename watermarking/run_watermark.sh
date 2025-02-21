@@ -63,18 +63,27 @@ cp SimCSE/simcse/models.py watermarking/models_cl.py
 # eda_output_file="$watermark_output_dir/multiple-spoofing-attack.csv"  # for c4
 
 # watermarking
-python watermarking/generation_1step_end2end.py \
+# python watermarking/generation_1step_end2end.py \
+#     --embed_map_model=$embed_map_model \
+#     --output_file=${watermark_output_file} \
+#     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+#     --data_path=${data_path} \
+#     --data_size=${data_size}
+#     # --correct_grammar=false
+
+# # ===== get similarity after 0-1 mapping =====
+# echo "get similarity after 0-1 mapping.."
+# python watermarking/eda_1step_end2end.py \
+#     --embed_map_model=$embed_map_model \
+#     --output_file=${eda_output_file} \
+#     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+#     --result_file=${watermark_output_file}
+
+# ===== latter sentiment spoofing attack =====
+echo "apply latter sentiment spoofing attack.."
+python watermarking/generation_1step_end2end_latter_spoof.py \
     --embed_map_model=$embed_map_model \
     --output_file=${watermark_output_file} \
-    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-    --data_path=${data_path} \
-    --data_size=${data_size}
-    # --correct_grammar=false
-
-# ===== get similarity after 0-1 mapping =====
-python watermarking/eda_1step_end2end.py \
-    --embed_map_model=$embed_map_model \
-    --output_file=${eda_output_file} \
     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
     --result_file=${watermark_output_file}
 
