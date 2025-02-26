@@ -438,6 +438,20 @@ def latter_spoofing_attack(text, original_sentiment, target_modified_sentiment):
         if output_text:  # not None
             if 'Response Format' in prompt:
                 spoofing_text = extract_info(output_text)
+                if spoofing_text is None:
+                    print('Can\'t extract info from response!')
+                    cnt += 1
+                    if cnt <= 10:
+                        print('===try calling api one more time===')
+                        continue
+                    else:
+                        print('Latter spoofing attack: API call failed!')
+                        result_dict = {
+                            'latter_spoofing_watermarked_text': None,
+                            'final_call_latter_spoofing_watermarked_text': None,
+                            'success_latter_spoofing': False,
+                        }
+                        return result_dict
             else:
                 Warning('No Special Response Format in Prompt!')
                 spoofing_text = output_text
