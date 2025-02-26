@@ -170,6 +170,19 @@ def cl_init(cls, config):
     cls.sim = Similarity(temp=cls.model_args.temp)
     cls.init_weights()
 
+def remove_diagonal_elements(input_tensor):
+    """
+    Removes the diagonal elements from a square matrix (bs, bs) 
+    and returns a new matrix of size (bs, bs-1).
+    """
+    if input_tensor.size(0) != input_tensor.size(1):
+        raise ValueError("Input tensor must be square (bs, bs).")
+    
+    bs = input_tensor.size(0)
+    mask = ~torch.eye(bs, dtype=torch.bool, device=input_tensor.device)  # Mask for non-diagonal elements
+    output_tensor = input_tensor[mask].view(bs, bs - 1)  # Reshape into (bs, bs-1)
+    return output_tensor
+
 def cl_forward(cls,
     input_ids=None,
     attention_mask=None,
@@ -183,8 +196,6 @@ def cl_forward(cls,
     return_dict=None,
     mlm_input_ids=None,
     mlm_labels=None,
-    lambda_1=1.0,
-    lambda_2=1.0,
 ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     batch_size = input_ids.size(0)
@@ -285,14 +296,15 @@ def cl_forward(cls,
         raise NotImplementedError
     
     # Mapping
-    mapping_output = cls.map(pooler_output)
-    # mapping_output = torch.tanh(mapping_output * 1000)  # approximate sign function
-    pooler_output = mapping_output
+    pooler_output = cls.map(pooler_output)
         
     # Separate representation
     z1 = pooler_output[:, 0]
     z2_list = [pooler_output[:, i] for i in range(1, cls.model_args.num_paraphrased + 1)]
-    z3_list = [pooler_output[:, i] for i in range(cls.model_args.num_paraphrased + 1, cls.model_args.num_paraphrased + cls.model_args.num_negative + 1)]
+    if cls.model_args.num_negative == 0:
+        z3_list = []
+    else:
+        z3_list = [pooler_output[:, i] for i in range(cls.model_args.num_paraphrased + 1, cls.model_args.num_paraphrased + cls.model_args.num_negative + 1)]
 
     # Gather all embeddings if using distributed training
     if dist.is_initialized() and cls.training:
@@ -303,7 +315,7 @@ def cl_forward(cls,
         x_nogradient = x.detach()
         return x + x.sign() - x_nogradient
     
-    # get sign value before calculating euclidean distance
+    # get sign value before calculating similarity
     z1 = torch.tanh(z1 * 1000)
     z2_list = [torch.tanh(z2 * 1000) for z2 in z2_list]
     z3_list = [torch.tanh(z3 * 1000) for z3 in z3_list]
@@ -313,44 +325,19 @@ def cl_forward(cls,
     # z3_list = [sign_ste(z3) for z3 in z3_list]
 
     # Compute contrastive loss
-    def remove_diagonal_elements(input_tensor):
-        """
-        Removes the diagonal elements from a square matrix (bs, bs) 
-        and returns a new matrix of size (bs, bs-1).
-        """
-        if input_tensor.size(0) != input_tensor.size(1):
-            raise ValueError("Input tensor must be square (bs, bs).")
-        
-        bs = input_tensor.size(0)
-        mask = ~torch.eye(bs, dtype=torch.bool, device=input_tensor.device)  # Mask for non-diagonal elements
-        output_tensor = input_tensor[mask].view(bs, bs - 1)  # Reshape into (bs, bs-1)
-        return output_tensor
-
-    z3_weight = cls.model_args.hard_negative_weight
-
-    if cls.model_args.loss_function_id == 1:
-        raise NotImplementedError
-        # z1_z2_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))  # (bs, bs)
-        # z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))  # (bs, bs)
-        # cos_sim = torch.cat([z1_z2_sim, z1_z3_cos], 1)  # (bs, bs*2)
-
-        # labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
-        # loss_fct = nn.CrossEntropyLoss()
-
-        # # Calculate loss with hard negatives
-        # # Note that weights are actually logits of weights
-        # weights = torch.tensor(
-        #     [[0.0] * z1_z2_sim.size(-1) + [0.0] * i + [z3_weight] + [0.0] * (z1_z3_cos.size(-1) - i - 1) for i in range(cos_sim.size(0))]
-        # ).to(cls.device)
-    elif cls.model_args.loss_function_id == 2:
+    if cls.model_args.cl_weight != 0:
+        z3_weight = cls.model_args.hard_negative_weight
         z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
         z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
         z1_z2_cos_list = [cls.sim(z1, z2).unsqueeze(1) for z2 in z2_list]  # [(bs, 1)] * num_paraphrased
         z1_z3_cos_list = [cls.sim(z1, z3).unsqueeze(1) for z3 in z3_list]  # [(bs,1)] * num_negative
-        z1_z3_cos = torch.cat(z1_z3_cos_list, dim=1)  # (bs, num_negative)
+        if z1_z3_cos_list:
+            z1_z3_cos = torch.cat(z1_z3_cos_list, dim=1)  # (bs, num_negative)
+        else:
+            z1_z3_cos = torch.empty((z1.size(0), 0), device=z1.device)  # (bs, 0)
 
         loss_fct = nn.CrossEntropyLoss()
-        loss_1 = 0
+        loss_cl = 0
         for z1_z2_cos in z1_z2_cos_list:
             cos_sim = torch.cat([z1_z2_cos, z1_z1_cos_removed, z1_z3_cos], 1)  # (bs, bs+num_negative)
             # Calculate loss with hard negatives
@@ -359,49 +346,45 @@ def cl_forward(cls,
             ).to(cls.device)
             cos_sim = cos_sim + weights
             labels = torch.zeros(cos_sim.size(0)).long().to(cls.device)
-            loss_1 += loss_fct(cos_sim, labels)
-        loss_1 /= cls.model_args.num_paraphrased
-    elif cls.model_args.loss_function_id == 3:
-        raise NotImplementedError
-        # z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
-        # z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
-        # z1_z2_cos = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))  # (bs, bs)
-        # z1_z3_cos = cls.sim(z1, z3).unsqueeze(1)  # (bs,1)
+            loss_cl += loss_fct(cos_sim, labels)
+        loss_cl /= cls.model_args.num_paraphrased
 
-        # cos_sim = torch.cat([z1_z2_cos, z1_z1_cos_removed, z1_z3_cos], 1)  # (bs, 2*bs)
-
-        # labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
-        # loss_fct = nn.CrossEntropyLoss()
-
-        # # Calculate loss with hard negatives
-        # weights = torch.tensor(
-        #     [[0.0] * z1_z2_cos.size(-1) + [0.0] * z1_z1_cos_removed.size(-1) + [z3_weight] for i in range(cos_sim.size(0))]
-        # ).to(cls.device)
-    elif cls.model_args.loss_function_id == 4:
-        raise NotImplementedError
-        # z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
-        # z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
-        # z1_z2_cos = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))  # (bs, bs)
-        # z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))  # (bs,bs)
-
-        # cos_sim = torch.cat([z1_z2_cos, z1_z1_cos_removed, z1_z3_cos], 1)  # (bs, 3*bs-1)
-
-        # labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
-        # loss_fct = nn.CrossEntropyLoss()
-
-        # # Calculate loss with hard negatives
-        # weights = torch.tensor(
-        #     [[0.0] * z1_z2_cos.size(-1) + [0.0] * z1_z1_cos_removed.size(-1) + [0.0] * i + [z3_weight] + [0.0] * (z1_z3_cos.size(-1) - i - 1) for i in range(cos_sim.size(0))]
-        # ).to(cls.device)
-    else:
-        raise NotImplementedError
+    # Calculate triplet loss
+    if cls.model_args.tl_weight != 0:
+        assert len(z3_list) == 1, 'There should be only one negative.'
+        z3 = z3_list[0]
+        # z1: (bs, hidden); z2: [(bs, hidden)] * num_paraphrased; z3: (bs, hidden)
+        # Compute cosine similarity between anchor (z1) and negative (z3) for all in batch
+        sim_neg = cls.sim(z1, z3).unsqueeze(1) * cls.model_args.temp  # (bs, 1)
+        
+        # Stack all positives together (z2_list is a list of tensors)
+        positives = torch.stack(z2_list, dim=1)  # (bs, num_paraphrased, hidden)
+        
+        # Compute cosine similarity between anchors (z1) and all positives (z2_list)
+        sim_pos = cls.sim(z1.unsqueeze(1), positives) * cls.model_args.temp  # (bs, num_paraphrased)
+        # debug
+        # sim_pos1 = torch.zeros((z1.size(0), cls.model_args.num_paraphrased), device=z1.device)
+        # for i in range(len(z2_list)):
+        #     sim_pos1[:, i] = cls.sim(z1, z2_list[i])
+        
+        # Compute the triplet loss for each positive paraphrase for each anchor
+        # debug
+        # tmp = torch.zeros((z1.size(0), cls.model_args.num_paraphrased), device=z1.device)
+        # for i in range(cls.model_args.num_paraphrased):
+        #     tmp[:, i] = sim_neg.squeeze() - sim_pos[:, i] + (cls.model_args.margin / cls.model_args.temp)
+        # xx = sim_neg - sim_pos + (cls.model_args.margin / cls.model_args.temp)
+        loss_per_positive = F.relu(sim_neg - sim_pos + cls.model_args.margin)  # (bs, num_paraphrased)
+        
+        # Average the losses over all paraphrases over the batch
+        loss_triplet = loss_per_positive.mean()  # Scalar
 
     # Calculate loss for MLM
     if mlm_outputs is not None and mlm_labels is not None:
-        mlm_labels = mlm_labels.view(-1, mlm_labels.size(-1))
-        prediction_scores = cls.lm_head(mlm_outputs.last_hidden_state)
-        masked_lm_loss = loss_fct(prediction_scores.view(-1, cls.config.vocab_size), mlm_labels.view(-1))
-        loss_1 = loss_1 + cls.model_args.mlm_weight * masked_lm_loss
+        raise NotImplementedError
+        # mlm_labels = mlm_labels.view(-1, mlm_labels.size(-1))
+        # prediction_scores = cls.lm_head(mlm_outputs.last_hidden_state)
+        # masked_lm_loss = loss_fct(prediction_scores.view(-1, cls.config.vocab_size), mlm_labels.view(-1))
+        # loss_cl = loss_cl + cls.model_args.mlm_weight * masked_lm_loss
     
     # Calculate loss for uniform perturbation and unbiased token preference
     def sign_loss(x):
@@ -410,35 +393,57 @@ def cl_forward(cls,
         col = torch.abs(torch.mean(torch.mean(x, dim=1)))
         return (row + col)/2
 
-    loss_2 = sign_loss(z1)
+    loss_gr = sign_loss(z1)
 
     # calculate loss_3: similarity between original and paraphrased text
     loss_3_list = [cls.sim(z1, z2).unsqueeze(1) for z2 in z2_list]  # [(bs, 1)] * num_paraphrased
     loss_3_tensor = torch.cat(loss_3_list, dim=1)  # (bs, num_paraphrased)
-    loss_3 = - loss_3_tensor.mean()
+    loss_3 = loss_3_tensor.mean() * cls.model_args.temp
     # debug: 
     # loss_3 = loss_3[valid_for_loss3.bool()]
 
     # calculate loss_4: similarity between original and negative text
-    loss_4_list = [cls.sim(z1, z3).unsqueeze(1) for z3 in z3_list]  # [(bs, 1)] * num_negative
-    loss_4_tensor = torch.cat(loss_4_list, dim=1)  # (bs, num_negative)
-    loss_4 = loss_4_tensor.mean()
+    if cls.model_args.num_negative == 0:
+        loss_4 = None
+    else:
+        loss_4_list = [cls.sim(z1, z3).unsqueeze(1) for z3 in z3_list]  # [(bs, 1)] * num_negative
+        loss_4_tensor = torch.cat(loss_4_list, dim=1)  # (bs, num_negative)
+        loss_4 = loss_4_tensor.mean() * cls.model_args.temp
 
-    loss = lambda_1 * loss_1 + lambda_2 * loss_2
+    # calculate loss_5: similarity between original and other original text
+    z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
+    z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
+    loss_5 = z1_z1_cos_removed.mean() * cls.model_args.temp
+
+    if cls.model_args.cl_weight != 0 and cls.model_args.tl_weight != 0:
+        loss = loss_gr + cls.model_args.cl_weight * loss_cl + cls.model_args.tl_weight * loss_triplet
+    elif cls.model_args.cl_weight != 0 and cls.model_args.tl_weight == 0:
+        loss = loss_gr + cls.model_args.cl_weight * loss_cl
+    elif cls.model_args.cl_weight == 0 and cls.model_args.tl_weight != 0:
+        loss = loss_gr + cls.model_args.tl_weight * loss_triplet
+    else:
+        raise ValueError("Both contrastive loss and triplet loss weights are zero.")
 
     result = {
         'loss': loss,
-        'loss_1': loss_1,
-        'loss_2': loss_2,
-        'loss_3': loss_3,
-        'loss_4': loss_4,
-        'logits': cos_sim,
+        'loss_gr': loss_gr,
+        'sim_paraphrase': loss_3,
+        'sim_other': loss_5,
         'hidden_states': outputs.hidden_states,
         'attentions': outputs.attentions,
     }
+
+    if cls.model_args.num_negative != 0:
+        result['sim_negative'] = loss_4
+    if cls.model_args.cl_weight != 0:
+        result['loss_cl'] = loss_cl
+    if cls.model_args.tl_weight != 0:
+        result['loss_tl'] = loss_triplet
+
     if not return_dict:
-        output = (cos_sim,) + outputs[2:]
-        return ((loss,) + output) if loss is not None else output
+        raise NotImplementedError
+        # output = (cos_sim,) + outputs[2:]
+        # return ((loss,) + output) if loss is not None else output
     return result
 
 

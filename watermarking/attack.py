@@ -2,13 +2,12 @@ import torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModel, AutoTokenizer
 from model import SemanticModel
-# import json
+import numpy as np
 import argparse
 # from datasets import load_dataset
 from tqdm import tqdm
 import nltk
 # nltk.download('punkt')
-import os
 import pandas as pd
 from random import shuffle
 import re
@@ -16,7 +15,6 @@ import random
 from utils import load_model, vocabulary_mapping
 from watermark import Watermark
 from api import call_chatgpt_api
-import openai
 from tenacity import RetryError
 
 import pdb
@@ -120,6 +118,40 @@ Your task is to modify the given text to clearly shift its sentiment to {modifie
 sentiment_judge_prompt = '''Please act as a judge and determine the sentiment of the following text. Your task is to assess whether the sentiment is positive, negative, or neutral based on the overall tone and emotion conveyed in the text. Consider factors like word choice, emotional context, and any implied feelings. The sentiment can only be chosen from 'positive', 'negative', and 'neutral'. 
 Begin your evaluation by providing a short explanation for your judgment. After providing your explanation, please indicate the sentiment by strictly following this format: "[[sentiment]]", for example: "Sentiment: [[positive]]".'''
 
+fact_extraction_prompt = '''### **Task: Identify the Most Important Facts in the Text**
+Extract **up to 10 of the most important factual details** from the given text, ranking them by importance.
+
+**Guidelines:**
+- Facts should be **ranked based on significance to the passage.**
+- If there are **fewer than 10 important facts, return only those that exist.**  
+- Focus on:
+  - **Main subject references** (who/what the text is about).
+  - **Key names and locations.**
+  - **Important numbers, dates, and events.**
+  - **Cause-effect relationships** that define meaning.
+  - **Significant adjectives or descriptions** that affect interpretation.
+- **Do NOT extract minor or trivial details.**
+- **Only list factual details; do not rewrite or modify anything.**
+
+**Response Format (Strictly Follow This Format, No Extra Text):**
+<fact1>[Most important fact]</fact1>
+<fact2>[Second most important fact]</fact2>
+<fact3>[Third most important fact]</fact3>
+...  
+<fact10>[Tenth most important fact]</fact10>
+
+**If fewer than 10 important facts exist, return only those found using the same format.**  
+**Do not add explanations, headers, or extra text—ONLY return the extracted facts.**
+'''
+
+factual_change_prompt = '''### **Task: Modify Selected Facts to Introduce Factual Inaccuracies**
+Modify **only the selected facts** in the given text to make it factually inaccurate.
+- **Only make word-level changes.**
+- **Do not modify anything other than the selected facts.**
+- **Keep sentence structure and fluency intact.**
+- **Response must contain only the modified text—do not add explanations, headers, or comments.**
+'''
+
 SENTIMENT_MAPPING = {
     'positive': 'negative',
     'negative': 'positive',
@@ -131,7 +163,6 @@ def decide_modified_sentiment(original_sentiment):
     else:
         return random.choice(['negative', 'positive'])
     
-
 def sentiment_judge(text, model):
     if not text:
         return None
@@ -165,6 +196,39 @@ def sentiment_judge(text, model):
                 print(f'API call failed!')
                 return
 
+def word_level_edit_distance(text1, text2):
+    if not isinstance(text1, str) or not isinstance(text2, str):
+        return None
+    
+    # 将文本分割成单词
+    words1 = text1.split()
+    words2 = text2.split()
+    
+    # 初始化动态规划矩阵
+    len1 = len(words1)
+    len2 = len(words2)
+    dp = np.zeros((len1 + 1, len2 + 1), dtype=int)
+    
+    # 填充第一列和第一行
+    for i in range(len1 + 1):
+        dp[i][0] = i
+    for j in range(len2 + 1):
+        dp[0][j] = j
+    
+    # 填充动态规划矩阵
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            if words1[i - 1] == words2[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]  # 如果单词相同，不需要操作
+            else:
+                dp[i][j] = min(
+                    dp[i - 1][j] + 1,   # 删除
+                    dp[i][j - 1] + 1,   # 插入
+                    dp[i - 1][j - 1] + 1  # 替换
+                )
+    
+    return dp[len1][len2]
+
 def shuffle_attack(text):
     # sentence-level tokenize
     text_list = nltk.sent_tokenize(text)
@@ -191,7 +255,28 @@ def shuffle_attack(text):
                 print('===try calling api one more time===')
             else:
                 print('API call failed!')
-                print(text)
+                return None
+
+def base_attack(messages, max_tokens=500, max_call=10):
+    keep_call = True
+    cnt = 0
+    while(keep_call):
+        # Make the API call
+        try:
+            response = call_chatgpt_api(messages, max_tokens=max_tokens, model='GPT-4o')
+        except RetryError as e:
+            print(e)
+            return None
+        output_text = response.choices[0].message.content
+        if output_text:  # not None
+            keep_call = False
+            return output_text
+        else:
+            cnt += 1
+            if cnt <= max_call:
+                print('===try calling api one more time===')
+            else:
+                print('API call failed!')
                 return None
 
 def paraphrase_attack(text):
@@ -205,28 +290,8 @@ def paraphrase_attack(text):
         },
     ]
 
-    max_tokens = 400
-    keep_call = True
-    cnt = 0
-    while(keep_call):
-        # Make the API call
-        try:
-            response = call_chatgpt_api(messages, max_tokens, model='GPT-4o')
-        except RetryError as e:
-            print(e)
-            return None
-        output_text = response.choices[0].message.content
-        if output_text:  # not None
-            keep_call = False
-            return output_text
-        else:
-            cnt += 1
-            if cnt <= 10:
-                print('===try calling api one more time===')
-            else:
-                print('API call failed!')
-                print(text)
-                return None
+    response = base_attack(messages, max_tokens=500)
+    return response
 
 def extract_info(text):
     if not isinstance(text, str):
@@ -238,7 +303,7 @@ def extract_info(text):
     extracted = match.group(1).strip() if match else None
     return extracted
 
-def spoofing_attack(text, latter_sentiment, modified_sentiment_ground_truth=None):
+def spoofing_attack(text, modified_sentiment_ground_truth=None):
     # return: original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_text, output_text
     if modified_sentiment_ground_truth:
         original_sentiment = SENTIMENT_MAPPING[modified_sentiment_ground_truth]
@@ -247,13 +312,10 @@ def spoofing_attack(text, latter_sentiment, modified_sentiment_ground_truth=None
         original_sentiment = sentiment_judge(text, model='GPT-4o')
         target_modified_sentiment = decide_modified_sentiment(original_sentiment)
     max_change = int(len(text.split()) * 0.2)
-    if latter_sentiment:
-        prompt = latter_sentiment_shift_prompt
-    else:
-        prompt = spoofing_prompt_label
+    
+    prompt = spoofing_prompt_label
     prompt = prompt.replace('{modified_sentiment}', target_modified_sentiment).replace('{x}', str(max_change))
 
-    num_words = len(text.strip().split(' '))
     messages = [
         {
             "role": "system", "content": prompt,
@@ -316,8 +378,7 @@ def spoofing_attack(text, latter_sentiment, modified_sentiment_ground_truth=None
         if cnt <= 10:
             print('===try calling api one more time===')
         else:
-            print('API call failed!')
-            print(text)
+            print('Spoofing attack: API call failed!')
             result_dict = {
                 'original_sentiment': original_sentiment,
                 'target_modified_sentiment': target_modified_sentiment,
@@ -328,6 +389,143 @@ def spoofing_attack(text, latter_sentiment, modified_sentiment_ground_truth=None
                 'success_spoofing': False
             }
             return result_dict
+
+def latter_spoofing_attack(text, original_sentiment, target_modified_sentiment):
+    # return: original_sentiment, target_modified_sentiment, modified_sentiment, spoofing_text, output_text
+
+    # split text into two parts
+    text_list = nltk.sent_tokenize(text)
+    text_length = len(text_list)
+    if text_length <= 2:
+        return {
+                'latter_spoofing_watermarked_text': None,
+                'final_call_latter_spoofing_watermarked_text': None,
+                'success_latter_spoofing': False,
+                }
+
+    unchanged_text = ' '.join(text_list[:text_length//2])
+    changed_text = ' '.join(text_list[text_length//2:])
+
+    max_change = int(len(text.split()) * 0.2 * 2)
+    
+    prompt = spoofing_prompt_label
+    prompt = prompt.replace('{modified_sentiment}', target_modified_sentiment).replace('{x}', str(max_change))
+
+    messages = [
+        {
+            "role": "system", "content": prompt,
+        },
+        {
+            "role": "user",  "content": changed_text.strip()
+        },
+    ]
+    max_tokens = 300
+    keep_call = True
+    cnt = 0
+    while(keep_call):
+        # Make the API call
+        try:
+            response = call_chatgpt_api(messages, max_tokens, model='GPT-4o')
+        except RetryError as e:
+            print(e)
+            result_dict = {
+                'latter_spoofing_watermarked_text': None,
+                'final_call_latter_spoofing_watermarked_text': None,
+                'success_latter_spoofing': False,
+            }
+            return result_dict
+        output_text = response.choices[0].message.content
+        if output_text:  # not None
+            if 'Response Format' in prompt:
+                spoofing_text = extract_info(output_text)
+            else:
+                Warning('No Special Response Format in Prompt!')
+                spoofing_text = output_text
+            spoofing_text = unchanged_text + ' ' + spoofing_text
+            # check if the sentiment is correctly modified
+            modified_sentiment = sentiment_judge(spoofing_text, model='GPT-4o')
+            if modified_sentiment == target_modified_sentiment:
+                keep_call = False
+            elif modified_sentiment != original_sentiment:
+                Warning('Modified sentiment is not consistent with the target sentiment! But still different from the original sentiment.')
+                keep_call = False
+            else:
+                keep_call = True
+
+            if not keep_call:
+                result_dict = {
+                    'latter_spoofing_watermarked_text': spoofing_text,
+                    'final_call_latter_spoofing_watermarked_text': None,
+                    'success_latter_spoofing': True,
+                }
+                return result_dict
+            
+        cnt += 1
+        if cnt <= 10:
+            print('===try calling api one more time===')
+        else:
+            print('Latter spoofing attack: API call failed!')
+            result_dict = {
+                'latter_spoofing_watermarked_text': None,
+                'final_call_latter_spoofing_watermarked_text': spoofing_text,
+                'success_latter_spoofing': False
+            }
+            return result_dict
+
+def hate_attack(hate_list, text):
+    # randomly sample two items from the hate_list
+    hate_words = random.sample(hate_list, 2)
+    hate_string = ' '.join(hate_words)
+    hate_text = text + ' ' + hate_string
+    return hate_text
+
+def factual_change_attack(text):
+    # Step 1: Extract Top 10 Most Important Facts (Strict Format)
+    messages = [
+        {
+            "role": "system", "content": fact_extraction_prompt,
+        },
+        {
+            "role": "user",  "content": text.strip()
+        },
+    ]
+    response = base_attack(messages)
+    if not response:
+        print('Fact extraction failed!')
+        return None
+
+    # Step 2: Select 5 Random Facts (Or Fewer If Less Exist)
+    def extract_facts(llm_output):
+        """Extracts facts from the formatted LLM output."""
+        pattern = r"<fact\d+>(.*?)</fact\d+>"
+        facts = re.findall(pattern, llm_output)
+        return facts
+
+    def select_facts(facts, num_to_select=5):
+        """Randomly selects up to num_to_select facts from the list."""
+        return random.sample(facts, min(len(facts), num_to_select))
+    
+    facts = extract_facts(response)
+    if len(facts) > 0:
+        selected_facts = select_facts(facts, 5)
+    else:
+        return None
+
+    # Step 3: Modify Only the Selected Facts in the Text 
+    user_content = f'''**Original Text:**  \n{text.strip()}\n\n**Selected Facts to Modify:**  \n'''
+    for i, fact in enumerate(selected_facts, 1):
+        user_content += f"{i}. **{fact}**\n"
+
+    messages = [
+        {
+            "role": "system", "content": factual_change_prompt,
+        },
+        {
+            "role": "user",  "content": user_content
+        },
+    ]
+    response = base_attack(messages)
+    return response
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

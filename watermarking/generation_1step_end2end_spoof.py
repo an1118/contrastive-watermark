@@ -92,7 +92,9 @@ def main(args):
     finished = 0
     if os.path.exists(f'{args.output_file}'):
         df = pd.read_csv(f'{args.output_file}')
-        df.drop(columns=[col for col in df.columns if 'latter' in col], inplace=True)
+        if 'spoofing_watermarked_text' in df.columns and df['spoofing_watermarked_text'].dropna().shape[0] >= 100:
+            print('===This setting has spoofing results. Skip spoofing attack.===')
+            return
     else:
         # create directory if no exists
         output_folder = os.path.dirname(args.output_file)
@@ -105,28 +107,35 @@ def main(args):
         df['success_latter_spoofing'] = ''
         df['final_call_latter_spoofing_watermarked_text'] = ''
         df['final_call_latter_spoofing_watermarked_text_score'] = ''
-        df['edit_distance_ori_latter_spoofing'] = ''
+        df['edit_distance_ori_latter_spoofing'] = ''        
 
     for i in tqdm(range(finished, len(df))):
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']
-        original_sentiment = df.loc[i, 'original_sentiment']
-        target_modified_sentiment = df.loc[i, 'target_modified_sentiment']
 
-        # latter spoofing attack
-        latter_spoofing_result_dict = latter_spoofing_attack(adaptive_watermarked_text, original_sentiment, target_modified_sentiment)
+        # spoofing attack
+        if 'imdb' in args.result_file.lower() and 'c4' not in args.data_path.lower():
+            # match the original sentiment
+            modified_sentiment_ground_truth = df.loc[i, 'modified_sentiment_ground_truth']
+            spoofing_result_dict = spoofing_attack(adaptive_watermarked_text, modified_sentiment_ground_truth)
+        else:
+            spoofing_result_dict = spoofing_attack(adaptive_watermarked_text)
 
         # detect
-        latter_spoofing_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['latter_spoofing_watermarked_text'] is not None else ''
-        final_call_latter_spoofing_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text'] is not None else ''
+        spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['spoofing_watermarked_text']) if spoofing_result_dict['spoofing_watermarked_text'] is not None else ''
+        final_call_spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['final_call_spoofing_watermarked_text']) if spoofing_result_dict['final_call_spoofing_watermarked_text'] is not None else ''
 
-        df.loc[i, 'latter_spoofing_watermarked_text'] = latter_spoofing_result_dict['latter_spoofing_watermarked_text']
-        df.loc[i, 'latter_spoofing_watermarked_text_score'] = latter_spoofing_watermarked_text_score
-        df.loc[i, 'success_latter_spoofing'] = latter_spoofing_result_dict['success_latter_spoofing']
-        df.loc[i, 'final_call_latter_spoofing_watermarked_text'] = latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text']
-        df.loc[i, 'final_call_latter_spoofing_watermarked_text_score'] = final_call_latter_spoofing_watermarked_text_score
-        if latter_spoofing_result_dict['success_latter_spoofing']:
-            df.loc[i, 'edit_distance_ori_latter_spoofing'] = word_level_edit_distance(adaptive_watermarked_text, latter_spoofing_result_dict['latter_spoofing_watermarked_text'])
-
+        df.loc[i, 'spoofing_watermarked_text'] = spoofing_result_dict['spoofing_watermarked_text']
+        df.loc[i, 'spoofing_attack_original_output'] = spoofing_result_dict['spoofing_attack_output']
+        df.loc[i, 'original_sentiment'] = spoofing_result_dict['original_sentiment']
+        df.loc[i, 'target_modified_sentiment'] = spoofing_result_dict['target_modified_sentiment']
+        df.loc[i, 'modified_sentiment'] = spoofing_result_dict['modified_sentiment']
+        df.loc[i, 'spoofing_watermarked_text_score'] = spoofing_watermarked_text_score
+        df.loc[i, 'success_spoofing'] = spoofing_result_dict['success_spoofing']
+        df.loc[i, 'final_call_spoofing_watermarked_text'] = spoofing_result_dict['final_call_spoofing_watermarked_text']
+        df.loc[i, 'final_call_spoofing_watermarked_text_score'] = final_call_spoofing_watermarked_text_score
+        if df.loc[i, 'success_spoofing']:
+            df.loc[i, 'edit_distance_ori_spoofing'] = word_level_edit_distance(adaptive_watermarked_text, spoofing_result_dict['spoofing_watermarked_text'])
+        
         df.to_csv(f'{args.output_file}', index=False)
 
 

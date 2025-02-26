@@ -4,7 +4,7 @@
 #SBATCH --error=outputs/%j.err
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
-##SBATCH --reservation=buyuheng 
+#SBATCH --reservation=buyuheng 
 #SBATCH --gpus=a100:1
 #SBATCH --mem=64gb
 #SBATCH --time=20:00:00
@@ -36,7 +36,7 @@ train_epochs=30
 cl_weight=0.0
 tl_weight=1.0
 neg_weight=1
-margin=0.6
+margin=0.9
 
 # watermarking parameters
 watermark_data_path="https://huggingface.co/datasets/allenai/c4/resolve/1ddc917116b730e1859edef32896ec5c16be51d0/realnewslike/c4-train.00000-of-00512.json.gz"
@@ -154,29 +154,29 @@ bash watermarking/run_watermark.sh \
   --alpha $alpha --delta_0 $delta_0 --delta $delta
 
 
-echo "=========== watermarking on IMDB ==========="
-watermark_data_path="/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/data/imdb-simcse-filtered-test.csv"
+# echo "=========== watermarking on IMDB ==========="
+# watermark_data_path="/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/data/imdb-simcse-filtered-test.csv"
 
-if [[ "${watermark_data_path,,}" == *"c4"* ]]; then
-  wm_dataset_name="c4"
-elif [[ "${watermark_data_path,,}" == *"imdb"* ]]; then
-  wm_dataset_name="imdb"
-elif [[ "${watermark_data_path,,}" == *"lfqa"* ]]; then
-  wm_dataset_name="lfqa"
-else
-  echo "don't know how to handle dataset $watermark_data_path"
-  exit 1
-fi
+# if [[ "${watermark_data_path,,}" == *"c4"* ]]; then
+#   wm_dataset_name="c4"
+# elif [[ "${watermark_data_path,,}" == *"imdb"* ]]; then
+#   wm_dataset_name="imdb"
+# elif [[ "${watermark_data_path,,}" == *"lfqa"* ]]; then
+#   wm_dataset_name="lfqa"
+# else
+#   echo "don't know how to handle dataset $watermark_data_path"
+#   exit 1
+# fi
 
-watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}-${num_negative_llama}gpt${num_paraphrased_gpt}-${num_negative_gpt}-${num_summary}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}"
+# watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}-${num_negative_llama}gpt${num_paraphrased_gpt}-${num_negative_gpt}-${num_summary}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}"
 
-watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
-eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-sim.csv"
+# watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
+# eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-sim.csv"
 
-bash watermarking/run_watermark.sh \
-  --gpu_id $gpu_id \
-  --embed_map_model $embed_map_model \
-  --data_path $watermark_data_path --data_size $data_size \
-  --watermark_output_file $watermark_output_file \
-  --eda_output_file $eda_output_file \
-  --alpha $alpha --delta_0 $delta_0 --delta $delta
+# bash watermarking/run_watermark.sh \
+#   --gpu_id $gpu_id \
+#   --embed_map_model $embed_map_model \
+#   --data_path $watermark_data_path --data_size $data_size \
+#   --watermark_output_file $watermark_output_file \
+#   --eda_output_file $eda_output_file \
+#   --alpha $alpha --delta_0 $delta_0 --delta $delta

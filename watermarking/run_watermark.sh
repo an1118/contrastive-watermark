@@ -71,6 +71,33 @@ cp SimCSE/simcse/models.py watermarking/models_cl.py
 #     --data_size=${data_size}
 #     # --correct_grammar=false
 
+# ===== sentiment spoofing attack =====
+echo "apply sentiment spoofing attack.."
+echo "$watermark_output_file"
+python watermarking/generation_1step_end2end_spoof.py \
+    --embed_map_model=$embed_map_model \
+    --output_file=${watermark_output_file} \
+    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+    --result_file=${watermark_output_file}
+
+# ===== latter sentiment spoofing attack =====
+echo "apply LATTER sentiment spoofing attack.."
+echo "$watermark_output_file"
+python watermarking/generation_1step_end2end_latter_spoof.py \
+    --embed_map_model=$embed_map_model \
+    --output_file=${watermark_output_file} \
+    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+    --result_file=${watermark_output_file}
+
+# # ===== hate speech & factual change attack =====
+# echo "apply hate speech & factual change attack.."
+# echo "$watermark_output_file"
+# python watermarking/generation_1step_end2end_hate_factual.py \
+#     --embed_map_model=$embed_map_model \
+#     --output_file=${watermark_output_file} \
+#     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+#     --result_file=${watermark_output_file}
+
 # # ===== get similarity after 0-1 mapping =====
 # echo "get similarity after 0-1 mapping.."
 # python watermarking/eda_1step_end2end.py \
@@ -78,15 +105,6 @@ cp SimCSE/simcse/models.py watermarking/models_cl.py
 #     --output_file=${eda_output_file} \
 #     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
 #     --result_file=${watermark_output_file}
-
-# ===== latter sentiment spoofing attack =====
-echo "apply latter sentiment spoofing attack.."
-echo "$watermark_output_file"
-python watermarking/generation_1step_end2end_latter_spoof.py \
-    --embed_map_model=$embed_map_model \
-    --output_file=${watermark_output_file} \
-    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-    --result_file=${watermark_output_file}
 
 # # ===== multiple time attack =====
 # CUDA_VISIBLE_DEVICES=$gpu_id python watermarking/eda_1step_end2end_multi-attack.py \

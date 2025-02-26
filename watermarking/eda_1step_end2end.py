@@ -90,35 +90,48 @@ def main(args):
                       )
         
     finished = 0
-    if os.path.exists(f'{args.output_file}'):
-        df = pd.read_csv(f'{args.output_file}')
-        finished = len(df['sim_ori_wm'].dropna().tolist())
-        print(f'===skiped first {finished} rows.===')
-    else:
-        # create directory if no exists
-        output_folder = os.path.dirname(args.output_file)
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-        df = pd.read_csv(args.result_file)
-        df['sim_ori_wm'] = ''
-        df['sim_ori_para'] = ''
-        df['sim_wm_para'] = ''
+    # if os.path.exists(f'{args.output_file}'):
+    #     df = pd.read_csv(f'{args.output_file}')
+    #     finished = len(df['sim_ori_wm'].dropna().tolist())
+    #     print(f'===skiped first {finished} rows.===')
+    # else:
+    #     # create directory if no exists
+    output_folder = os.path.dirname(args.output_file)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    df = pd.read_csv(args.result_file)
+    df['sim_ori_wm'] = ''
+    df['sim_ori_para'] = ''
+    df['sim_ori_spoofing'] = ''
+    df['sim_ori_latter_spoofing'] = ''
+    df['sim_ori_hate'] = ''
+    df['sim_ori_factual'] = ''
+    df['sim_wm_para'] = ''
 
-    distance_type = 'l2'
+    distance_type = 'cosine'
     for i in tqdm(range(finished, len(df))):
         original_text = df.loc[i, 'original_text']
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']
         paraphrased_watermarked_text = df.loc[i, 'paraphrased_watermarked_text']
         spoofing_watermarked_text = df.loc[i, 'spoofing_watermarked_text']
+        latter_spoofing_watermarked_text = df.loc[i, 'latter_spoofing_watermarked_text']
+        hate_watermarked_text = df.loc[i, 'hate_watermarked_text']
+        factual_watermarked_text = df.loc[i, 'factual_watermarked_text']
 
         sim_ori_wm = watermark._sim_after_mapping_sign(original_text, adaptive_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(adaptive_watermarked_text) else ''
         sim_ori_para = watermark._sim_after_mapping_sign(original_text, paraphrased_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(paraphrased_watermarked_text) else ''
         sim_ori_spoofing = watermark._sim_after_mapping_sign(original_text, spoofing_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(spoofing_watermarked_text) else ''
+        sim_ori_latter_spoofing = watermark._sim_after_mapping_sign(original_text, latter_spoofing_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(latter_spoofing_watermarked_text) else ''
+        sim_ori_hate = watermark._sim_after_mapping_sign(original_text, hate_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(hate_watermarked_text) else ''
+        sim_ori_factual = watermark._sim_after_mapping_sign(original_text, factual_watermarked_text, distance_type) if not pd.isna(original_text) and not pd.isna(factual_watermarked_text) else ''
         sim_wm_para = watermark._sim_after_mapping_sign(adaptive_watermarked_text, paraphrased_watermarked_text, distance_type) if not pd.isna(adaptive_watermarked_text) and not pd.isna(paraphrased_watermarked_text) else ''
 
         df.loc[i, 'sim_ori_wm'] = sim_ori_wm
         df.loc[i, 'sim_ori_para'] = sim_ori_para
         df.loc[i, 'sim_ori_spoofing'] = sim_ori_spoofing
+        df.loc[i, 'sim_ori_latter_spoofing'] = sim_ori_latter_spoofing
+        df.loc[i, 'sim_ori_hate'] = sim_ori_hate
+        df.loc[i, 'sim_ori_factual'] = sim_ori_factual
         df.loc[i, 'sim_wm_para'] = sim_wm_para
 
         df.to_csv(f'{args.output_file}', index=False)

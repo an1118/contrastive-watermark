@@ -10,10 +10,11 @@ from tqdm import tqdm
 import nltk
 # nltk.download('punkt')
 import os
+import json
 
-from utils import load_model, pre_process, vocabulary_mapping
+from utils import load_model, vocabulary_mapping
 from watermark_end2end import Watermark
-from attack import latter_spoofing_attack, word_level_edit_distance, spoofing_attack
+from attack import hate_attack, factual_change_attack
 from models_cl import RobertaForCL, Qwen2ForCL
 
 def main(args):
@@ -92,40 +93,36 @@ def main(args):
     finished = 0
     if os.path.exists(f'{args.output_file}'):
         df = pd.read_csv(f'{args.output_file}')
-        df.drop(columns=[col for col in df.columns if 'latter' in col], inplace=True)
+        if 'hate_watermarked_text' in df.columns and 'factual_watermarked_text' in df.columns:
+            finished = min(len(df['hate_watermarked_text'].dropna().tolist()), len(df['factual_watermarked_text'].dropna().tolist()))
+            print(f'===skiped first {finished} rows.===')
     else:
         # create directory if no exists
         output_folder = os.path.dirname(args.output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
         df = pd.read_csv(args.result_file)
-        df['latter_spoofing_watermarked_text'] = ''
-        df['latter_spoofing_attack_original_output'] = ''
-        df['latter_spoofing_watermarked_text_score'] = ''
-        df['success_latter_spoofing'] = ''
-        df['final_call_latter_spoofing_watermarked_text'] = ''
-        df['final_call_latter_spoofing_watermarked_text_score'] = ''
-        df['edit_distance_ori_latter_spoofing'] = ''
+
+    # read hate phrases list
+    hate_phrases_path = r"/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/watermarking/hate_phrase.json"
+    with open(hate_phrases_path, 'r') as f:
+        hate_phrases_list = json.load(f)
 
     for i in tqdm(range(finished, len(df))):
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']
-        original_sentiment = df.loc[i, 'original_sentiment']
-        target_modified_sentiment = df.loc[i, 'target_modified_sentiment']
 
-        # latter spoofing attack
-        latter_spoofing_result_dict = latter_spoofing_attack(adaptive_watermarked_text, original_sentiment, target_modified_sentiment)
+        # hate attack
+        hate_watermarked_text = hate_attack(hate_phrases_list, adaptive_watermarked_text)
+        hate_watermarked_text_score = watermark.detection(hate_watermarked_text) if hate_watermarked_text is not None else ''
 
-        # detect
-        latter_spoofing_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['latter_spoofing_watermarked_text'] is not None else ''
-        final_call_latter_spoofing_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text'] is not None else ''
+        # factual change attack
+        factual_watermarked_text = factual_change_attack(adaptive_watermarked_text)
+        factual_watermarked_text_score = watermark.detection(factual_watermarked_text) if factual_watermarked_text is not None else ''
 
-        df.loc[i, 'latter_spoofing_watermarked_text'] = latter_spoofing_result_dict['latter_spoofing_watermarked_text']
-        df.loc[i, 'latter_spoofing_watermarked_text_score'] = latter_spoofing_watermarked_text_score
-        df.loc[i, 'success_latter_spoofing'] = latter_spoofing_result_dict['success_latter_spoofing']
-        df.loc[i, 'final_call_latter_spoofing_watermarked_text'] = latter_spoofing_result_dict['final_call_latter_spoofing_watermarked_text']
-        df.loc[i, 'final_call_latter_spoofing_watermarked_text_score'] = final_call_latter_spoofing_watermarked_text_score
-        if latter_spoofing_result_dict['success_latter_spoofing']:
-            df.loc[i, 'edit_distance_ori_latter_spoofing'] = word_level_edit_distance(adaptive_watermarked_text, latter_spoofing_result_dict['latter_spoofing_watermarked_text'])
+        df.loc[i, 'hate_watermarked_text'] = hate_watermarked_text
+        df.loc[i, 'hate_watermarked_text_score'] = hate_watermarked_text_score
+        df.loc[i, 'factual_watermarked_text'] = factual_watermarked_text
+        df.loc[i, 'factual_watermarked_text_score'] = factual_watermarked_text_score
 
         df.to_csv(f'{args.output_file}', index=False)
 
