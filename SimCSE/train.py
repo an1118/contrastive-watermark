@@ -150,22 +150,28 @@ class ModelArguments:
             "help": "Number of GPT paraphrased examples."
         }
     )
-    num_negative_llama: int = field(
+    num_sentiment_spoof: int = field(
         default = None,
         metadata={
-            "help": "Number of LLama negative examples."
+            "help": "Number of sentiment spoofing examples."
         }
     )
-    num_negative_gpt: int = field(
+    num_latter_sentiment_spoof: int = field(
         default = None,
         metadata={
-            "help": "Number of GPT negative examples."
+            "help": "Number of LATTER sentiment spoofing examples."
         }
     )
-    num_summary: int = field(
+    num_factual_spoof: int = field(
         default = None,
         metadata={
-            "help": "Number of GPT generated summary."
+            "help": "Number of factual change spoofing examples."
+        }
+    )
+    num_hate: int = field(
+        default = None,
+        metadata={
+            "help": "Number of hate speech examples."
         }
     )
     cl_weight: float = field(
@@ -291,6 +297,11 @@ class OurTrainingArguments(TrainingArguments):
         default=None,
         metadata={"help": "label names."},
     )
+    remove_unused_columns: bool = field(
+        default=False,
+        metadata={"help": "Don't remove columns."}
+    )
+
 
 
     @cached_property
@@ -480,32 +491,38 @@ def main():
     original_cname = 'original'
     paraphrase_llama_cnames = [cname for cname in column_names if cname.startswith('paraphrase') and cname.endswith('llama')]
     paraphrase_gpt_cnames = [cname for cname in column_names if cname.startswith('paraphrase') and cname.endswith('gpt')]
-    negative_llama_cnames = [cname for cname in column_names if cname.startswith('spoofing') and cname.endswith('llama')]
-    negative_gpt_cnames = [cname for cname in column_names if cname.startswith('spoofing') and cname.endswith('gpt')]
-    summary_cnames = [cname for cname in column_names if cname.startswith('summary') and cname.endswith('gpt')]
 
     num_paraphrased_llama, num_paraphrased_gpt = model_args.num_paraphrased_llama, model_args.num_paraphrased_gpt
-    num_negative_llama, num_negative_gpt = model_args.num_negative_llama, model_args.num_negative_gpt
-    num_summary = model_args.num_summary
 
     assert num_paraphrased_llama <= len(paraphrase_llama_cnames), f"Number of LLama paraphrased examples ({num_paraphrased_llama}) exceeds the max number of paraphrases ({len(paraphrase_llama_cnames)})."
     assert num_paraphrased_gpt <= len(paraphrase_gpt_cnames), f"Number of GPT paraphrased examples ({num_paraphrased_gpt}) exceeds the max number of paraphrases ({len(paraphrase_gpt_cnames)})."
-    assert num_negative_llama <= len(negative_llama_cnames), f"Number of LLama negative examples ({num_negative_llama}) exceeds the max number of negatives ({len(negative_llama_cnames)})."
-    assert num_negative_gpt <= len(negative_gpt_cnames), f"Number of GPT negative examples ({num_negative_gpt}) exceeds the max number of negatives ({len(negative_gpt_cnames)})."
-    assert num_summary <= len(summary_cnames), f"Number of GPT generated summary ({num_summary}) exceeds the max number of summaries ({len(summary_cnames)})."
 
-    paraphrase_cnames = paraphrase_llama_cnames[:num_paraphrased_llama] + paraphrase_gpt_cnames[:num_paraphrased_gpt] + summary_cnames[:num_summary]
-    negative_cnames = negative_llama_cnames[:num_negative_llama] + negative_gpt_cnames[:num_negative_gpt]
+    paraphrase_cnames = paraphrase_llama_cnames[:num_paraphrased_llama] + paraphrase_gpt_cnames[:num_paraphrased_gpt]
 
-    if 'paraphrase_wm' in column_names:
-        paraphrase_cnames.append('paraphrase_wm')
-        print('Added watermarked text as paraphrase.')
+    num_sentiment_spoof, num_latter_sentiment_spoof, num_factual_spoof, num_hate = model_args.num_sentiment_spoof, model_args.num_latter_sentiment_spoof, model_args.num_factual_spoof, model_args.num_hate
+    spoofing_cnames = []
+    if num_sentiment_spoof > 0:
+        if num_sentiment_spoof != 1:
+            raise NotImplementedError
+        spoofing_cnames += ['sentiment_spoof_0']
+    if num_latter_sentiment_spoof > 0:
+        if num_latter_sentiment_spoof != 1:
+            raise NotImplementedError
+        spoofing_cnames += ['latter_sentiment_spoof_0']
+    if num_factual_spoof > 0:
+        if num_factual_spoof != 1:
+            raise NotImplementedError
+        spoofing_cnames += ['factual_spoof_0']
+    if num_hate > 0:
+        if num_hate != 1:
+            raise NotImplementedError
+        spoofing_cnames += ['hate_spoof_0']
 
     num_paraphrased = len(paraphrase_cnames)
     model_args.num_paraphrased = num_paraphrased
-    num_negative = len(negative_cnames)
-    model_args.num_negative = num_negative
-    print(f"======Contrastive learning with {len(paraphrase_cnames)} paraphrased and {len(negative_cnames)} negative examples.======")
+    model_args.num_negative = len(spoofing_cnames)
+    model_args.spoofing_cnames = spoofing_cnames
+    print(f"======Contrastive learning with {len(paraphrase_cnames)} paraphrased and {len(spoofing_cnames)} spoofing examples.======")
 
     def prepare_features(examples):
         # padding = longest (default)
@@ -517,14 +534,19 @@ def main():
         #   All sentences are padded/truncated to data_args.max_seq_length.
         total = len(examples[original_cname])
 
+        # indicate if the original sentence has a successful latter sentiment spoofing
+        latter_sentiment_spoof_mask = [1] * total
+
         # Avoid "None" fields 
         for idx in range(total):
-            for cname in ['original'] + paraphrase_cnames + negative_cnames:
+            for cname in ['original'] + paraphrase_cnames + spoofing_cnames:
                 if examples[cname][idx] is None:
+                    assert cname == 'latter_sentiment_spoof_0', f'Column {cname} has None value.'
                     examples[cname][idx] = " "
+                    latter_sentiment_spoof_mask[idx] = 0
         
         sentences = examples[original_cname]
-        for cname in paraphrase_cnames + negative_cnames:
+        for cname in paraphrase_cnames + spoofing_cnames:
             sentences += examples[cname]
         
         sent_features = tokenizer(
@@ -536,11 +558,17 @@ def main():
 
         features = {}
         for key in sent_features:
-            features[key] = [[sent_features[key][i]] \
-                              + [sent_features[key][i + total * (j+1)] for j in range(num_paraphrased)] \
-                              + [sent_features[key][i + total * (j+1)] for j in range(num_paraphrased, num_paraphrased + num_negative)] \
-                              for i in range(total)]
+            group_size = total
+            num_groups = 1 + num_paraphrased + num_sentiment_spoof + num_latter_sentiment_spoof + num_factual_spoof + num_hate
+
+            # a 'num_groups' sub list, each has 'total' elements
+            split_lists = [sent_features[key][i * group_size: (i + 1) * group_size] for i in range(num_groups)]
+
+            # transpose the nested list
+            nested_list = list(map(list, zip(*split_lists)))
+            features[key] = nested_list
             
+        features['latter_sentiment_spoof_mask'] = latter_sentiment_spoof_mask
         return features
 
     if training_args.do_train:
@@ -572,7 +600,7 @@ def main():
         mlm_probability: float = data_args.mlm_probability
 
         def __call__(self, features: List[Dict[str, Union[List[int], List[List[int]], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels']
+            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels', 'latter_sentiment_spoof_mask']
             bs = len(features)
             if bs > 0:
                 num_sent = len(features[0]['input_ids'])
@@ -581,7 +609,7 @@ def main():
             flat_features = []
             for feature in features:
                 for i in range(num_sent):
-                    flat_features.append({k: feature[k][i] if k in special_keys else feature[k] for k in feature})
+                    flat_features.append({k: feature[k][i] if k in special_keys else feature[k] for k in feature if k != 'latter_sentiment_spoof_mask'})
 
             batch = self.tokenizer.pad(
                 flat_features,
@@ -602,6 +630,9 @@ def main():
                 batch["labels"] = batch["label_ids"]
                 del batch["label_ids"]
 
+            batch["latter_sentiment_spoof_mask"] = torch.tensor(
+                [feature["latter_sentiment_spoof_mask"] for feature in features], dtype=torch.float
+            )
             return batch
         
         def mask_tokens(

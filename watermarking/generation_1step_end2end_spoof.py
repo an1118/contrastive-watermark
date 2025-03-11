@@ -92,22 +92,15 @@ def main(args):
     finished = 0
     if os.path.exists(f'{args.output_file}'):
         df = pd.read_csv(f'{args.output_file}')
-        if 'spoofing_watermarked_text' in df.columns and df['spoofing_watermarked_text'].dropna().shape[0] >= 100:
-            print('===This setting has spoofing results. Skip spoofing attack.===')
-            return
+        # if 'spoofing_watermarked_text' in df.columns and df['spoofing_watermarked_text'].dropna().shape[0] >= 100:
+        #     print('===This setting has spoofing results. Skip spoofing attack.===')
+        #     return
     else:
         # create directory if no exists
         output_folder = os.path.dirname(args.output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
         df = pd.read_csv(args.result_file)
-        df['latter_spoofing_watermarked_text'] = ''
-        df['latter_spoofing_attack_original_output'] = ''
-        df['latter_spoofing_watermarked_text_score'] = ''
-        df['success_latter_spoofing'] = ''
-        df['final_call_latter_spoofing_watermarked_text'] = ''
-        df['final_call_latter_spoofing_watermarked_text_score'] = ''
-        df['edit_distance_ori_latter_spoofing'] = ''        
 
     for i in tqdm(range(finished, len(df))):
         adaptive_watermarked_text = df.loc[i, 'adaptive_watermarked_text']

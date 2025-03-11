@@ -10,10 +10,11 @@ from tqdm import tqdm
 import nltk
 # nltk.download('punkt')
 import os
+import json
 
 from utils import load_model, pre_process, vocabulary_mapping
 from watermark_end2end import Watermark
-from attack import paraphrase_attack, spoofing_attack
+from attack import paraphrase_attack, spoofing_attack, latter_spoofing_attack, hate_attack
 from models_cl import RobertaForCL, Qwen2ForCL
 
 SYS_PROMPT = f'''Paraphrase the following text while preserving its original meaning. Ensure that the output meets the following criteria:
@@ -53,6 +54,12 @@ def main(args):
         freeze_base=None,
     )
 
+    config_path = os.path.join(embed_map_model_path, "config.json")
+    if not os.path.exists(config_path):
+        checkpoint_dirs = [d for d in os.listdir(embed_map_model_path) if d.startswith('checkpoint-')]
+        if checkpoint_dirs:
+            latest_checkpoint = max(checkpoint_dirs, key=lambda x: int(x.split('-')[-1]))
+            embed_map_model_path = os.path.join(embed_map_model_path, latest_checkpoint)
     embed_map_config = AutoConfig.from_pretrained(os.path.join(embed_map_model_path, "config.json"))
     embed_map_tokenizer = AutoTokenizer.from_pretrained(embed_map_model_path)
     if 'roberta' in embed_map_model_path.lower():
@@ -73,8 +80,8 @@ def main(args):
         )
     embed_map_model.eval()
     # load mapping list
-    # vocabulary_size = watermark_tokenizer.vocab_size  # vacalulary size of LLM. Notice: OPT is 50272
-    vocabulary_size = 128256
+    vocabulary_size = watermark_model.config.vocab_size
+
     mapping_list = vocabulary_mapping(vocabulary_size, 384, seed=66)
     # load test dataset.
     data_path = args.data_path
@@ -110,7 +117,15 @@ def main(args):
         output_folder = os.path.dirname(args.output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text', 'watermarked_corrected_text', 'paraphrased_watermarked_text', 'spoofing_watermarked_text', 'human_score', 'adaptive_watermarked_text_score', 'corrected_watermarked_score', 'paraphrased_watermarked_text_score', 'spoofing_watermarked_text_score', 'success_spoofing', 'final_call_spoofing_watermarked_text', 'final_call_spoofing_watermarked_text_score'])
+        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text', 'watermarked_corrected_text', 'paraphrased_watermarked_text', \
+                        'sentiment_spoofed_watermarked_text', 'latter_sentiment_spoofed_watermarked_text', 'hate_spoofed_watermarked_text', \
+                        'human_score', 'adaptive_watermarked_text_score', 'corrected_watermarked_score', 'paraphrased_watermarked_text_score', \
+                        'sentiment_spoofed_watermarked_text_score', 'latter_sentiment_spoofed_watermarked_text_score', 'hate_spoofed_watermarked_text_score'])
+
+    # read hate phrases list
+    hate_phrases_path = r"/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/watermarking/hate_phrase.json"
+    with open(hate_phrases_path, 'r') as f:
+        hate_phrases_list = json.load(f)
 
     watermark_rate = []  # debug
     for i in tqdm(range(finished, len(dataset))):
@@ -151,7 +166,7 @@ def main(args):
             spoofing_result_dict = spoofing_attack(watermarked_text, modified_sentiment_ground_truth)
         else:
             spoofing_result_dict = spoofing_attack(watermarked_text)
-
+        
         # detections
         human_score = watermark.detection(text)
         adaptive_watermarked_text_score = watermark.detection(watermarked_text)
@@ -160,8 +175,18 @@ def main(args):
         else:
             corrected_watermarked_score = None
         paraphrased_watermarked_text_score = watermark.detection(paraphrased_watermarked_text) if paraphrased_watermarked_text is not None else ''
-        spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['spoofing_watermarked_text']) if spoofing_result_dict['spoofing_watermarked_text'] is not None else ''
-        final_call_spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['final_call_spoofing_watermarked_text']) if spoofing_result_dict['final_call_spoofing_watermarked_text'] is not None else ''
+        sentiment_spoofed_watermarked_text_score = watermark.detection(spoofing_result_dict['spoofing_watermarked_text']) if spoofing_result_dict['spoofing_watermarked_text'] is not None else ''
+        # final_call_spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['final_call_spoofing_watermarked_text']) if spoofing_result_dict['final_call_spoofing_watermarked_text'] is not None else ''
+
+        # latter sentiment spoofing
+        original_sentiment = spoofing_result_dict['original_sentiment']
+        target_modified_sentiment = spoofing_result_dict['target_modified_sentiment']
+        latter_spoofing_result_dict = latter_spoofing_attack(watermarked_text, original_sentiment, target_modified_sentiment)
+        latter_sentiment_spoofed_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['latter_spoofing_watermarked_text'] is not None else ''
+
+        # hate spoofing
+        hate_spoofed_watermarked_text = hate_attack(hate_phrases_list, watermarked_text)
+        hate_spoofed_watermarked_text_score = watermark.detection(hate_spoofed_watermarked_text) if hate_spoofed_watermarked_text is not None else ''
 
         data = {
             'text_id': [i],
@@ -170,19 +195,23 @@ def main(args):
             'adaptive_watermarked_text': [watermarked_text],
             'watermarked_corrected_text': [watermarked_corrected_text],
             'paraphrased_watermarked_text': [paraphrased_watermarked_text],
-            'spoofing_watermarked_text': [spoofing_result_dict['spoofing_watermarked_text']],
-            'spoofing_attack_original_output': [spoofing_result_dict['spoofing_attack_output']],
+            'sentiment_spoofed_watermarked_text': [spoofing_result_dict['spoofing_watermarked_text']],
+            'sentiment_spoofed_original_output': [spoofing_result_dict['spoofing_attack_output']],
             'original_sentiment': [spoofing_result_dict['original_sentiment']],
             'target_modified_sentiment': [spoofing_result_dict['target_modified_sentiment']],
             'modified_sentiment': [spoofing_result_dict['modified_sentiment']],
+            'latter_sentiment_spoofed_watermarked_text': [latter_spoofing_result_dict['latter_spoofing_watermarked_text']],
+            'hate_spoofed_watermarked_text': [hate_spoofed_watermarked_text],
             'human_score': [human_score],
             'adaptive_watermarked_text_score': [adaptive_watermarked_text_score],
             'corrected_watermarked_score': [corrected_watermarked_score],
             'paraphrased_watermarked_text_score': [paraphrased_watermarked_text_score],
-            'spoofing_watermarked_text_score': spoofing_watermarked_text_score,
-            'success_spoofing': [spoofing_result_dict['success_spoofing']],
-            'final_call_spoofing_watermarked_text': [spoofing_result_dict['final_call_spoofing_watermarked_text']],
-            'final_call_spoofing_watermarked_text_score': final_call_spoofing_watermarked_text_score,
+            'sentiment_spoofed_watermarked_text_score': [sentiment_spoofed_watermarked_text_score],
+            'latter_sentiment_spoofed_watermarked_text_score': [latter_sentiment_spoofed_watermarked_text_score],
+            'hate_spoofed_watermarked_text_score': [hate_spoofed_watermarked_text_score],
+            # 'success_spoofing': [spoofing_result_dict['success_spoofing']],
+            # 'final_call_spoofing_watermarked_text': [spoofing_result_dict['final_call_spoofing_watermarked_text']],
+            # 'final_call_spoofing_watermarked_text_score': [final_call_spoofing_watermarked_text_score],
         }
         df  = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
         df.to_csv(f'{args.output_file}', index=False)

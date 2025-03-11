@@ -31,7 +31,7 @@ def truncate_text(text, max_length):
     return ' '.join(truncated_text)
 
 def pre_process(data_path, min_length, max_length, data_size=500):
-    # only use data with length >= min_length
+    # only use data with length >= min_length, and truncate if necessary
     data = []
     if data_path.endswith('.csv'):
         dataset = pd.read_csv(data_path)

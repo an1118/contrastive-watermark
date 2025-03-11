@@ -14,6 +14,11 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --watermark_model)
+      watermark_model="$2"
+      shift
+      shift
+      ;;
     --data_path)
       data_path="$2"
       shift
@@ -62,32 +67,33 @@ cp SimCSE/simcse/models.py watermarking/models_cl.py
 
 # eda_output_file="$watermark_output_dir/multiple-spoofing-attack.csv"  # for c4
 
-# watermarking
-# python watermarking/generation_1step_end2end.py \
+# ===== watermarking =====
+python watermarking/generation_1step_end2end.py \
+    --embed_map_model=$embed_map_model \
+    --watermark_model=$watermark_model \
+    --output_file=${watermark_output_file} \
+    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+    --data_path=${data_path} \
+    --data_size=${data_size}
+    # --correct_grammar=false
+
+# # ===== sentiment spoofing attack =====
+# echo "apply sentiment spoofing attack.."
+# echo "$watermark_output_file"
+# python watermarking/generation_1step_end2end_spoof.py \
 #     --embed_map_model=$embed_map_model \
 #     --output_file=${watermark_output_file} \
 #     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-#     --data_path=${data_path} \
-#     --data_size=${data_size}
-#     # --correct_grammar=false
+#     --result_file=${watermark_output_file}
 
-# ===== sentiment spoofing attack =====
-echo "apply sentiment spoofing attack.."
-echo "$watermark_output_file"
-python watermarking/generation_1step_end2end_spoof.py \
-    --embed_map_model=$embed_map_model \
-    --output_file=${watermark_output_file} \
-    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-    --result_file=${watermark_output_file}
-
-# ===== latter sentiment spoofing attack =====
-echo "apply LATTER sentiment spoofing attack.."
-echo "$watermark_output_file"
-python watermarking/generation_1step_end2end_latter_spoof.py \
-    --embed_map_model=$embed_map_model \
-    --output_file=${watermark_output_file} \
-    --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
-    --result_file=${watermark_output_file}
+# # ===== latter sentiment spoofing attack =====
+# echo "apply LATTER sentiment spoofing attack.."
+# echo "$watermark_output_file"
+# python watermarking/generation_1step_end2end_latter_spoof.py \
+#     --embed_map_model=$embed_map_model \
+#     --output_file=${watermark_output_file} \
+#     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
+#     --result_file=${watermark_output_file}
 
 # # ===== hate speech & factual change attack =====
 # echo "apply hate speech & factual change attack.."

@@ -93,6 +93,8 @@ def main(args):
     if os.path.exists(f'{args.output_file}'):
         df = pd.read_csv(f'{args.output_file}')
         df.drop(columns=[col for col in df.columns if 'latter' in col], inplace=True)
+        # finished = df['latter_spoofing_watermarked_text'].last_valid_index() + 1
+        # print(f'===finished {finished} samples===')
     else:
         # create directory if no exists
         output_folder = os.path.dirname(args.output_file)
