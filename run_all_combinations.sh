@@ -146,7 +146,7 @@ else
   exit 1
 fi
 
-watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}gpt${num_paraphrased_gpt}-sent${num_sentiment_spoof}-latter_sent${num_latter_sentiment_spoof}-fact${num_factual_spoof}-hate${num_hate}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}/wm-model-$watermark_model"
+watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}gpt${num_paraphrased_gpt}-sent${num_sentiment_spoof}-latter_sent${num_latter_sentiment_spoof}-fact${num_factual_spoof}-hate${num_hate}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}/wm-model-$(basename "$watermark_model")"
 
 watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
 eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-sim.csv"
