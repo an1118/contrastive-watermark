@@ -59,6 +59,11 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --result_file)
+      result_file="$2"
+      shift
+      shift
+      ;;
     *)
       shift
       ;;
@@ -73,13 +78,14 @@ cp SimCSE/simcse/models.py watermarking/models_cl.py
 # eda_output_file="$watermark_output_dir/multiple-spoofing-attack.csv"  # for c4
 
 # ===== watermarking =====
-python watermarking/generation_1step_end2end.py \
+python watermarking/generation_1step_end2end_grammar_correct.py \
     --embed_map_model=$embed_map_model \
     --watermark_model=$watermark_model \
     --output_file=${watermark_output_file} \
     --alpha=${alpha} --delta_0=$delta_0 --delta=$delta \
     --data_path=${data_path} \
     --data_size=${data_size} \
+    --result_file $result_file \
     $( [ "$correct_grammar" = true ] && echo "--correct_grammar" )
     # --correct_grammar=false
 

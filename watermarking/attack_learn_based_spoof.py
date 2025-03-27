@@ -1,5 +1,4 @@
 import torch
-from sentence_transformers import SentenceTransformer
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 from types import SimpleNamespace
 from model import SemanticModel
@@ -11,10 +10,10 @@ import nltk
 # nltk.download('punkt')
 import os
 import json
+from collections import Counter
 
 from utils import load_model, pre_process, vocabulary_mapping
 from watermark_end2end import Watermark
-from attack import paraphrase_attack, spoofing_attack, latter_spoofing_attack, hate_attack, base_attack
 from models_cl import RobertaForCL, Qwen2ForCL
 
 SYS_PROMPT = f'''Paraphrase the following text while preserving its original meaning. Ensure that the output meets the following criteria:
@@ -28,6 +27,21 @@ SYS_PROMPT = f'''Paraphrase the following text while preserving its original mea
 
 Just provide the paraphrased version of the text, without any introductory or concluding phrases.
 '''
+
+def get_top_tokens(df, tokenizer, text_column='adaptive_watermarked_text', top_k=50):
+    all_token_ids = []
+    
+    for text in df[text_column]:
+        token_ids = tokenizer(text, add_special_tokens=False)['input_ids']
+        all_token_ids.extend(token_ids)
+
+    token_counts = Counter(all_token_ids)
+    top_k_ids = token_counts.most_common(top_k)
+    import pdb; pdb.set_trace()
+    top_k_ids = [token_id for token_id, count in top_k_ids]
+    # top_k_tokens = [(tokenizer.decode([token_id]), count) for token_id, count in top_k_ids]
+    
+    return top_k_ids
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,117 +130,39 @@ def main(args):
         output_folder = os.path.dirname(args.output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text', 'watermarked_corrected_text', 'paraphrased_watermarked_text', \
-                        'sentiment_spoofed_watermarked_text', 'latter_sentiment_spoofed_watermarked_text', 'hate_spoofed_watermarked_text', \
-                        'human_score', 'adaptive_watermarked_text_score', 'corrected_watermarked_score', 'paraphrased_watermarked_text_score', \
-                        'sentiment_spoofed_watermarked_text_score', 'latter_sentiment_spoofed_watermarked_text_score', 'hate_spoofed_watermarked_text_score'])
+        df = pd.DataFrame(columns=['text_id', 'original_text', 'adaptive_watermarked_text'])
 
-    # read hate phrases list
-    hate_phrases_path = r"/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/watermarking/hate_phrase.json"
-    with open(hate_phrases_path, 'r') as f:
-        hate_phrases_list = json.load(f)
-
-    watermark_rate = []  # debug
-    for i in tqdm(range(finished, len(dataset))):
-        text = dataset[i]['text']
-        messages = [
-            {
-                "role": "system", "content": SYS_PROMPT,
-            },
-            {
-                "role": "user",  "content": text
-            },
-        ]
-        prompt = watermark.watermark_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    text = dataset[0]['text']
+    messages = [
+        {
+            "role": "system", "content": SYS_PROMPT,
+        },
+        {
+            "role": "user",  "content": text
+        },
+    ]
+    prompt = watermark.watermark_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    for i in tqdm(range(finished, args.num_queries), total=args.num_queries):
         
         # unwatermarked_text = watermark.generate_unwatermarked(prompt)
         watermarked_text = watermark.generate_watermarked(prompt, text)
 
-        if args.correct_grammar:  # do grammar correction
-            grammar_prompt = "Please correct only grammar errors in the text without altering the original phrasing or meaning. Do not reword sentences unless absolutely necessary for grammatical correctness. Respond with only the corrected text."
-            messages = [
-                {
-                    "role": "system", "content": grammar_prompt,
-                },
-                {
-                    "role": "user",  "content": f"Here's the text: \n{watermarked_text}"
-                },
-            ]
-            watermarked_corrected_text = base_attack(messages)
-        else:
-            watermarked_corrected_text = ''
-
-        original_watermarked_text = watermarked_text
-        if args.correct_grammar:  # do grammar correction
-            if watermarked_corrected_text:
-                watermarked_text = watermarked_corrected_text
-            else:
-                print('Grammar correction failed, use the original watermarked text instead.', flush=True)
-
-        # attack
-        paraphrased_watermarked_text = paraphrase_attack(watermarked_text)
-        if 'imdb' in args.data_path.lower() and 'c4' not in args.data_path.lower():
-            # match the original sentiment
-            modified_sentiment_ground_truth = dataset[i]['modified_sentiment_ground_truth']
-            spoofing_result_dict = spoofing_attack(watermarked_text, modified_sentiment_ground_truth)
-        else:
-            spoofing_result_dict = spoofing_attack(watermarked_text)
-        
-        # detections
-        human_score = watermark.detection(text)
-        adaptive_watermarked_text_score = watermark.detection(original_watermarked_text)
-        if args.correct_grammar and watermarked_corrected_text:  # do grammar correction
-            corrected_watermarked_score = watermark.detection(watermarked_corrected_text)
-        else:
-            corrected_watermarked_score = None
-        paraphrased_watermarked_text_score = watermark.detection(paraphrased_watermarked_text) if paraphrased_watermarked_text is not None else ''
-        sentiment_spoofed_watermarked_text_score = watermark.detection(spoofing_result_dict['spoofing_watermarked_text']) if spoofing_result_dict['spoofing_watermarked_text'] is not None else ''
-        # final_call_spoofing_watermarked_text_score = watermark.detection(spoofing_result_dict['final_call_spoofing_watermarked_text']) if spoofing_result_dict['final_call_spoofing_watermarked_text'] is not None else ''
-
-        # latter sentiment spoofing
-        original_sentiment = spoofing_result_dict['original_sentiment']
-        target_modified_sentiment = spoofing_result_dict['target_modified_sentiment']
-        latter_spoofing_result_dict = latter_spoofing_attack(watermarked_text, original_sentiment, target_modified_sentiment)
-        latter_sentiment_spoofed_watermarked_text_score = watermark.detection(latter_spoofing_result_dict['latter_spoofing_watermarked_text']) if latter_spoofing_result_dict['latter_spoofing_watermarked_text'] is not None else ''
-
-        # hate spoofing
-        hate_spoofed_watermarked_text = hate_attack(hate_phrases_list, watermarked_text)
-        hate_spoofed_watermarked_text_score = watermark.detection(hate_spoofed_watermarked_text) if hate_spoofed_watermarked_text is not None else ''
-
         data = {
             'text_id': [i],
             'original_text': [text],
-            # 'unwatermarked_text': [unwatermarked_text],
-            'adaptive_watermarked_text': [original_watermarked_text],
-            'watermarked_corrected_text': [watermarked_corrected_text],
-            'paraphrased_watermarked_text': [paraphrased_watermarked_text],
-            'sentiment_spoofed_watermarked_text': [spoofing_result_dict['spoofing_watermarked_text']],
-            'sentiment_spoofed_original_output': [spoofing_result_dict['spoofing_attack_output']],
-            'original_sentiment': [spoofing_result_dict['original_sentiment']],
-            'target_modified_sentiment': [spoofing_result_dict['target_modified_sentiment']],
-            'modified_sentiment': [spoofing_result_dict['modified_sentiment']],
-            'latter_sentiment_spoofed_watermarked_text': [latter_spoofing_result_dict['latter_spoofing_watermarked_text']],
-            'hate_spoofed_watermarked_text': [hate_spoofed_watermarked_text],
-            'human_score': [human_score],
-            'adaptive_watermarked_text_score': [adaptive_watermarked_text_score],
-            'corrected_watermarked_score': [corrected_watermarked_score],
-            'paraphrased_watermarked_text_score': [paraphrased_watermarked_text_score],
-            'sentiment_spoofed_watermarked_text_score': [sentiment_spoofed_watermarked_text_score],
-            'latter_sentiment_spoofed_watermarked_text_score': [latter_sentiment_spoofed_watermarked_text_score],
-            'hate_spoofed_watermarked_text_score': [hate_spoofed_watermarked_text_score],
-            # 'success_spoofing': [spoofing_result_dict['success_spoofing']],
-            # 'final_call_spoofing_watermarked_text': [spoofing_result_dict['final_call_spoofing_watermarked_text']],
-            # 'final_call_spoofing_watermarked_text_score': [final_call_spoofing_watermarked_text_score],
+            'adaptive_watermarked_text': [watermarked_text],
         }
         df  = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
         df.to_csv(f'{args.output_file}', index=False)
-        watermark_rate.append((watermark.num_watermarked_token, watermark.num_token))
-        watermark.num_watermarked_token, watermark.num_token = 0, 0
     
-    if watermark_rate:
-        tmp = [w / t for w, t in watermark_rate]
-        awr = sum(tmp) / len(tmp)
-        print(f'=== Average watermarked rate: {awr}')
+    # ===== Attack ===== #
+    k_values = [50, 100, 200]
+    for k in k_values:
+        # find k top frequent tokens
+        top_tokens = get_top_tokens(df, watermark_tokenizer, text_column='adaptive_watermarked_text', top_k=k)
+        # load green-red token split
+        decrption_rate = watermark.attack_decryption_rate(text, top_tokens)
+        print(f'top {k} tokens decryption rate: {round(decrption_rate, 4)}')
 
 
 
@@ -261,6 +197,8 @@ if __name__ == '__main__':
                         help='Data Path.')
     parser.add_argument('--data_size', default=100, type=int, \
                         help='Number of data.')
+    parser.add_argument('--num_queries', default=1000, type=int, \
+                        help='Number of queries.')
 
     args = parser.parse_args()
     main(args)

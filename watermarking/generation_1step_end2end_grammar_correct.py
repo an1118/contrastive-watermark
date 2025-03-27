@@ -108,6 +108,11 @@ def main(args):
                       )
         
     finished = 0
+    if args.result_file and os.path.exists(args.result_file):
+        no_correction_df = pd.read_csv(args.result_file)
+        useful_columns = ['text_id', 'original_text', 'adaptive_watermarked_text','human_score', 'adaptive_watermarked_text_score']
+        no_correction_df = no_correction_df[useful_columns]
+
     if os.path.exists(f'{args.output_file}'):
         df = pd.read_csv(f'{args.output_file}')
         finished = df.shape[0]
@@ -129,18 +134,21 @@ def main(args):
     watermark_rate = []  # debug
     for i in tqdm(range(finished, len(dataset))):
         text = dataset[i]['text']
-        messages = [
-            {
-                "role": "system", "content": SYS_PROMPT,
-            },
-            {
-                "role": "user",  "content": text
-            },
-        ]
-        prompt = watermark.watermark_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        
-        # unwatermarked_text = watermark.generate_unwatermarked(prompt)
-        watermarked_text = watermark.generate_watermarked(prompt, text)
+        if args.result_file and no_correction_df.loc[i, 'adaptive_watermarked_text']:
+            watermarked_text = no_correction_df.loc[i, 'adaptive_watermarked_text']
+        else:
+            messages = [
+                {
+                    "role": "system", "content": SYS_PROMPT,
+                },
+                {
+                    "role": "user",  "content": text
+                },
+            ]
+            prompt = watermark.watermark_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            
+            # unwatermarked_text = watermark.generate_unwatermarked(prompt)
+            watermarked_text = watermark.generate_watermarked(prompt, text)
 
         if args.correct_grammar:  # do grammar correction
             grammar_prompt = "Please correct only grammar errors in the text without altering the original phrasing or meaning. Do not reword sentences unless absolutely necessary for grammatical correctness. Respond with only the corrected text."
@@ -173,8 +181,14 @@ def main(args):
             spoofing_result_dict = spoofing_attack(watermarked_text)
         
         # detections
-        human_score = watermark.detection(text)
-        adaptive_watermarked_text_score = watermark.detection(original_watermarked_text)
+        if args.result_file and no_correction_df.loc[i, 'human_score']:
+            human_score = no_correction_df.loc[i, 'human_score']
+        else:
+            human_score = watermark.detection(text)
+        if args.result_file and no_correction_df.loc[i, 'adaptive_watermarked_text_score']:
+            adaptive_watermarked_text_score = no_correction_df.loc[i, 'adaptive_watermarked_text_score']
+        else:
+            adaptive_watermarked_text_score = watermark.detection(original_watermarked_text)
         if args.correct_grammar and watermarked_corrected_text:  # do grammar correction
             corrected_watermarked_score = watermark.detection(watermarked_corrected_text)
         else:
@@ -220,13 +234,13 @@ def main(args):
         }
         df  = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
         df.to_csv(f'{args.output_file}', index=False)
-        watermark_rate.append((watermark.num_watermarked_token, watermark.num_token))
-        watermark.num_watermarked_token, watermark.num_token = 0, 0
+        # watermark_rate.append((watermark.num_watermarked_token, watermark.num_token))
+        # watermark.num_watermarked_token, watermark.num_token = 0, 0
     
-    if watermark_rate:
-        tmp = [w / t for w, t in watermark_rate]
-        awr = sum(tmp) / len(tmp)
-        print(f'=== Average watermarked rate: {awr}')
+    # if watermark_rate:
+    #     tmp = [w / t for w, t in watermark_rate]
+    #     awr = sum(tmp) / len(tmp)
+    #     print(f'=== Average watermarked rate: {awr}')
 
 
 
@@ -261,6 +275,8 @@ if __name__ == '__main__':
                         help='Data Path.')
     parser.add_argument('--data_size', default=100, type=int, \
                         help='Number of data.')
+    parser.add_argument('--result_file', default='', type=str, \
+                        help='Result path.')
 
     args = parser.parse_args()
     main(args)

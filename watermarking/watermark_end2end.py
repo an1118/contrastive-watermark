@@ -292,6 +292,20 @@ class Watermark():
         output_text = self.watermark_tokenizer.decode(output_ids[0])
         return output_text
 
+    def attack_decryption_rate(self, original_text, top_tokens):
+        # get green-red split
+        mapping = self._sentiment_embed_map(original_text, self.embed_map_model, self.embed_map_tokenizer, self.device)
+        mapping = mapping.tolist()
+        mapping = [1.0 if x>0.0 else 0.0 for x in mapping]
+        v_embedding = torch.tensor([mapping[i] for i in self.mapping_list], device=self.device)
+
+        # check correct green tokens
+        correct = 0
+        for token in top_tokens:
+            if v_embedding[token] > 0:
+                correct += 1
+        return correct/len(top_tokens)
+
     # Adaptive watermark text generation
     def generate_watermarked(self, prompt, original_text, apply_min_new_tokens=False):
         input_ids = self.watermark_tokenizer.encode(prompt, return_tensors='pt').to(self.device)

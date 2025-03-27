@@ -42,12 +42,12 @@ margin=0.9
 
 # watermarking parameters
 watermark_data_path="https://huggingface.co/datasets/allenai/c4/resolve/1ddc917116b730e1859edef32896ec5c16be51d0/realnewslike/c4-train.00000-of-00512.json.gz"
-watermark_model="Qwen/Qwen2.5-7B-Instruct"  # Qwen/Qwen2.5-7B-Instruct  meta-llama/Llama-3.1-8B-Instruct
+watermark_model="meta-llama/Llama-3.1-8B-Instruct"  # Qwen/Qwen2.5-7B-Instruct  meta-llama/Llama-3.1-8B-Instruct
 data_size=200
 alpha=2.0
-delta_0=0.1
-delta=0.13
-correct_grammar=false
+delta_0=0.2
+delta=0.5
+correct_grammar=true
 
 model_name_=$(basename "$model_name")
 if [[ "$model_name_" == "gte-Qwen2-1.5B-instruct" ]]; then
@@ -121,10 +121,11 @@ fi
 
 watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}gpt${num_paraphrased_gpt}-sent${num_sentiment_spoof}-latter_sent${num_latter_sentiment_spoof}-fact${num_factual_spoof}-hate${num_hate}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}/wm-model-$(basename "$watermark_model")"
 
-watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
-eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-sim.csv"
+no_grammar_watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
+watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-grammar.csv"
+eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-grammar-sim.csv"
 
-bash watermarking/run_watermark.sh \
+bash watermarking/run_watermark_grammar.sh \
   --gpu_id $gpu_id \
   --embed_map_model $embed_map_model \
   --watermark_model $watermark_model \
@@ -132,7 +133,8 @@ bash watermarking/run_watermark.sh \
   --watermark_output_file $watermark_output_file \
   --eda_output_file $eda_output_file \
   --alpha $alpha --delta_0 $delta_0 --delta $delta \
-  $( [ "$correct_grammar" = true ] && echo "--correct_grammar" )
+  --result_file $no_grammar_watermark_output_file \
+  --correct_grammar $correct_grammar
 
 echo "=========== watermarking on LFQA ==========="
 echo "margin: $margin"  # debug
@@ -151,10 +153,11 @@ fi
 
 watermark_output_dir="$repo/watermarking/outputs/${dataset}/${model_name_}/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}gpt${num_paraphrased_gpt}-sent${num_sentiment_spoof}-latter_sent${num_latter_sentiment_spoof}-fact${num_factual_spoof}-hate${num_hate}/loss_cl${cl_weight}-tl${tl_weight}-wneg${neg_weight}-margin${margin}/wm-model-$(basename "$watermark_model")"
 
-watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
-eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-sim.csv"
+no_grammar_watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}.csv"
+watermark_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-grammar.csv"
+eda_output_file="$watermark_output_dir/wm-${wm_dataset_name}-alpha${alpha}-delta${delta_0}|${delta}-grammar-sim.csv"
 
-bash watermarking/run_watermark.sh \
+bash watermarking/run_watermark_grammar.sh \
   --gpu_id $gpu_id \
   --embed_map_model $embed_map_model \
   --watermark_model $watermark_model \
@@ -162,6 +165,7 @@ bash watermarking/run_watermark.sh \
   --watermark_output_file $watermark_output_file \
   --eda_output_file $eda_output_file \
   --alpha $alpha --delta_0 $delta_0 --delta $delta \
+  --result_file $no_grammar_watermark_output_file \
   --correct_grammar $correct_grammar
 
 

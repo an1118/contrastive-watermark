@@ -196,6 +196,7 @@ def cl_forward(cls,
     return_dict=None,
     mlm_input_ids=None,
     mlm_labels=None,
+    latter_sentiment_spoof_mask=None,
 ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     batch_size = input_ids.size(0)
@@ -296,15 +297,15 @@ def cl_forward(cls,
         raise NotImplementedError
     
     # Mapping
-    pooler_output = cls.map(pooler_output)
+    pooler_output = cls.map(pooler_output)  # (bs, num_sent, hidden_states)
         
     # Separate representation
-    z1 = pooler_output[:, 0]
-    z2_list = [pooler_output[:, i] for i in range(1, cls.model_args.num_paraphrased + 1)]
+    original = pooler_output[:, 0]
+    paraphrase_list = [pooler_output[:, i] for i in range(1, cls.model_args.num_paraphrased + 1)]
     if cls.model_args.num_negative == 0:
-        z3_list = []
+        negative_list = []
     else:
-        z3_list = [pooler_output[:, i] for i in range(cls.model_args.num_paraphrased + 1, cls.model_args.num_paraphrased + cls.model_args.num_negative + 1)]
+        negative_list = [pooler_output[:, i] for i in range(cls.model_args.num_paraphrased + 1, cls.model_args.num_paraphrased + cls.model_args.num_negative + 1)]
 
     # Gather all embeddings if using distributed training
     if dist.is_initialized() and cls.training:
@@ -316,9 +317,13 @@ def cl_forward(cls,
         return x + x.sign() - x_nogradient
     
     # get sign value before calculating similarity
-    z1 = torch.tanh(z1 * 1000)
-    z2_list = [torch.tanh(z2 * 1000) for z2 in z2_list]
-    z3_list = [torch.tanh(z3 * 1000) for z3 in z3_list]
+    original = torch.tanh(original * 1000)
+    paraphrase_list = [torch.tanh(p * 1000) for p in paraphrase_list]
+    negative_list = [torch.tanh(n * 1000) for n in negative_list]
+    spoofing_cnames = cls.model_args.spoofing_cnames
+    negative_dict = {}
+    for cname, n in zip(spoofing_cnames, negative_list):
+        negative_dict[cname] = n
 
     # z1 = sign_ste(z1)
     # z2_list = [sign_ste(z2) for z2 in z2_list]
@@ -326,57 +331,43 @@ def cl_forward(cls,
 
     # Compute contrastive loss
     if cls.model_args.cl_weight != 0:
-        z3_weight = cls.model_args.hard_negative_weight
-        z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
-        z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
-        z1_z2_cos_list = [cls.sim(z1, z2).unsqueeze(1) for z2 in z2_list]  # [(bs, 1)] * num_paraphrased
-        z1_z3_cos_list = [cls.sim(z1, z3).unsqueeze(1) for z3 in z3_list]  # [(bs,1)] * num_negative
-        if z1_z3_cos_list:
-            z1_z3_cos = torch.cat(z1_z3_cos_list, dim=1)  # (bs, num_negative)
-        else:
-            z1_z3_cos = torch.empty((z1.size(0), 0), device=z1.device)  # (bs, 0)
-
-        loss_fct = nn.CrossEntropyLoss()
+        negative_weight = cls.model_args.hard_negative_weight
+        ori_ori_cos = cls.sim(original.unsqueeze(1), original.unsqueeze(0))  # (bs, bs)
+        ori_ori_cos_removed = remove_diagonal_elements(ori_ori_cos)  # (bs, bs-1)
+        ori_para_cos_list = [cls.sim(original, p).unsqueeze(1) for p in paraphrase_list]  # [(bs, 1)] * num_paraphrased
+        ori_neg_cos_list = [cls.sim(original, n).unsqueeze(1) for n in negative_list]  # [(bs,1)] * num_negative
+        ori_neg_cos_dict = {}
+        for cname, n in zip(spoofing_cnames, ori_neg_cos_list):
+            ori_neg_cos_dict[cname] = n
+        
         loss_cl = 0
-        for z1_z2_cos in z1_z2_cos_list:
-            cos_sim = torch.cat([z1_z2_cos, z1_z1_cos_removed, z1_z3_cos], 1)  # (bs, bs+num_negative)
-            # Calculate loss with hard negatives
-            weights = torch.tensor(
-                [[0.0] * z1_z2_cos.size(-1) + [0.0] * z1_z1_cos_removed.size(-1) + [z3_weight] * cls.model_args.num_negative for i in range(cos_sim.size(0))]
-            ).to(cls.device)
-            cos_sim = cos_sim + weights
-            labels = torch.zeros(cos_sim.size(0)).long().to(cls.device)
-            loss_cl += loss_fct(cos_sim, labels)
-        loss_cl /= cls.model_args.num_paraphrased
+        for i in range(batch_size):
+            ori = ori_ori_cos_removed[i].sum()
+            neg = 0
+            for cname in spoofing_cnames:
+                if cname == 'latter_sentiment_spoof_0' and latter_sentiment_spoof_mask[i] == 0:
+                    continue
+                neg += ori_neg_cos_dict[cname][i]
+            for j in range(cls.model_args.num_paraphrased):
+                pos = ori_para_cos_list[j][i]
+                denominator = ori + pos + negative_weight * neg
+                fraction = pos / (ori + pos + negative_weight * neg)
+                loss_cl -= torch.log(fraction)
+        loss_cl /= (batch_size * cls.model_args.num_paraphrased)
 
     # Calculate triplet loss
     if cls.model_args.tl_weight != 0:
-        assert len(z3_list) == 1, 'There should be only one negative.'
-        z3 = z3_list[0]
-        # z1: (bs, hidden); z2: [(bs, hidden)] * num_paraphrased; z3: (bs, hidden)
-        # Compute cosine similarity between anchor (z1) and negative (z3) for all in batch
-        sim_neg = cls.sim(z1, z3).unsqueeze(1) * cls.model_args.temp  # (bs, 1)
-        
-        # Stack all positives together (z2_list is a list of tensors)
-        positives = torch.stack(z2_list, dim=1)  # (bs, num_paraphrased, hidden)
-        
-        # Compute cosine similarity between anchors (z1) and all positives (z2_list)
-        sim_pos = cls.sim(z1.unsqueeze(1), positives) * cls.model_args.temp  # (bs, num_paraphrased)
-        # debug
-        # sim_pos1 = torch.zeros((z1.size(0), cls.model_args.num_paraphrased), device=z1.device)
-        # for i in range(len(z2_list)):
-        #     sim_pos1[:, i] = cls.sim(z1, z2_list[i])
-        
-        # Compute the triplet loss for each positive paraphrase for each anchor
-        # debug
-        # tmp = torch.zeros((z1.size(0), cls.model_args.num_paraphrased), device=z1.device)
-        # for i in range(cls.model_args.num_paraphrased):
-        #     tmp[:, i] = sim_neg.squeeze() - sim_pos[:, i] + (cls.model_args.margin / cls.model_args.temp)
-        # xx = sim_neg - sim_pos + (cls.model_args.margin / cls.model_args.temp)
-        loss_per_positive = F.relu(sim_neg - sim_pos + cls.model_args.margin)  # (bs, num_paraphrased)
-        
-        # Average the losses over all paraphrases over the batch
-        loss_triplet = loss_per_positive.mean()  # Scalar
+        loss_triplet = 0
+        for i in range(batch_size):
+            for j in range(cls.model_args.num_paraphrased):
+                for cname in spoofing_cnames:
+                    if cname == 'latter_sentiment_spoof_0' and latter_sentiment_spoof_mask[i] == 0:
+                        continue
+                    ori = original[i]
+                    pos = paraphrase_list[j][i]
+                    neg = negative_dict[cname][i]
+                    loss_triplet += F.relu(cls.sim(ori, neg) * cls.model_args.temp  - cls.sim(ori, pos) * cls.model_args.temp  + cls.model_args.margin)
+        loss_triplet /= (batch_size * cls.model_args.num_paraphrased * len(spoofing_cnames))
 
     # Calculate loss for MLM
     if mlm_outputs is not None and mlm_labels is not None:
@@ -393,27 +384,30 @@ def cl_forward(cls,
         col = torch.abs(torch.mean(torch.mean(x, dim=1)))
         return (row + col)/2
 
-    loss_gr = sign_loss(z1)
+    loss_gr = sign_loss(original)
 
     # calculate loss_3: similarity between original and paraphrased text
-    loss_3_list = [cls.sim(z1, z2).unsqueeze(1) for z2 in z2_list]  # [(bs, 1)] * num_paraphrased
+    loss_3_list = [cls.sim(original, p).unsqueeze(1) for p in paraphrase_list]  # [(bs, 1)] * num_paraphrased
     loss_3_tensor = torch.cat(loss_3_list, dim=1)  # (bs, num_paraphrased)
     loss_3 = loss_3_tensor.mean() * cls.model_args.temp
     # debug: 
     # loss_3 = loss_3[valid_for_loss3.bool()]
 
-    # calculate loss_4: similarity between original and negative text
-    if cls.model_args.num_negative == 0:
-        loss_4 = None
-    else:
-        loss_4_list = [cls.sim(z1, z3).unsqueeze(1) for z3 in z3_list]  # [(bs, 1)] * num_negative
-        loss_4_tensor = torch.cat(loss_4_list, dim=1)  # (bs, num_negative)
-        loss_4 = loss_4_tensor.mean() * cls.model_args.temp
+    # calculate loss_sent: similarity between original and sentiment spoofed text
+    negative_sample_loss = {}
+    for cname in spoofing_cnames:
+        negatives = negative_dict[cname]
+        originals = original.clone()
+        if cname == 'latter_sentiment_spoof_0':
+            negatives = negatives[latter_sentiment_spoof_mask == 1]
+            originals = originals[latter_sentiment_spoof_mask == 1]
+        one_negative_loss = cls.sim(originals, negatives).mean() * cls.model_args.temp
+        negative_sample_loss[cname] = one_negative_loss
 
     # calculate loss_5: similarity between original and other original text
-    z1_z1_cos = cls.sim(z1.unsqueeze(1), z1.unsqueeze(0))  # (bs, bs)
-    z1_z1_cos_removed = remove_diagonal_elements(z1_z1_cos)  # (bs, bs-1)
-    loss_5 = z1_z1_cos_removed.mean() * cls.model_args.temp
+    ori_ori_cos = cls.sim(original.unsqueeze(1), original.unsqueeze(0))  # (bs, bs)
+    ori_ori_cos_removed = remove_diagonal_elements(ori_ori_cos)  # (bs, bs-1)
+    loss_5 = ori_ori_cos_removed.mean() * cls.model_args.temp
 
     if cls.model_args.cl_weight != 0 and cls.model_args.tl_weight != 0:
         loss = loss_gr + cls.model_args.cl_weight * loss_cl + cls.model_args.tl_weight * loss_triplet
@@ -433,8 +427,10 @@ def cl_forward(cls,
         'attentions': outputs.attentions,
     }
 
-    if cls.model_args.num_negative != 0:
-        result['sim_negative'] = loss_4
+    for cname, l in negative_sample_loss.items():
+        key = f"sim_{cname.replace('_spoof_0', '')}"
+        result[key] = l
+
     if cls.model_args.cl_weight != 0:
         result['loss_cl'] = loss_cl
     if cls.model_args.tl_weight != 0:
@@ -575,6 +571,7 @@ class RobertaForCL(RobertaForSequenceClassification):
         sent_emb=False,
         mlm_input_ids=None,
         mlm_labels=None,
+        latter_sentiment_spoof_mask=None,
     ):
         if sent_emb:
             return sentemb_forward(self,
@@ -603,6 +600,7 @@ class RobertaForCL(RobertaForSequenceClassification):
                 return_dict=return_dict,
                 mlm_input_ids=mlm_input_ids,
                 mlm_labels=mlm_labels,
+                latter_sentiment_spoof_mask=latter_sentiment_spoof_mask,
             )
 
 class Qwen2ForCL(Qwen2PreTrainedModel):
@@ -643,6 +641,7 @@ class Qwen2ForCL(Qwen2PreTrainedModel):
         sent_emb=False,
         mlm_input_ids=None,
         mlm_labels=None,
+        latter_sentiment_spoof_mask=None,
     ):
         if sent_emb:
             return sentemb_forward(self,
@@ -671,5 +670,6 @@ class Qwen2ForCL(Qwen2PreTrainedModel):
                 return_dict=return_dict,
                 mlm_input_ids=mlm_input_ids,
                 mlm_labels=mlm_labels,
+                latter_sentiment_spoof_mask=latter_sentiment_spoof_mask,
             )
 
