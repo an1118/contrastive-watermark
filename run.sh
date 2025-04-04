@@ -46,7 +46,7 @@ echo "watermarking parameters: alpha: $alpha, delta_0: $delta_0, delta: $delta"
 echo "============================================================"
 
 embed_map_model="${repo}/contrastive_train/result/${batch_size}batch_${train_epochs}epochs/llama${num_paraphrased_llama}gpt${num_paraphrased_gpt}-sent${num_sentiment_spoof}-latter_sent${num_latter_sentiment_spoof}-hate${num_hate}/loss_margin${margin}"
-bash contrastive_train/run_sup_example_inbatch.sh \
+bash contrastive_train/run_contrastive_train.sh \
   --dataset_name $dataset_name \
   --num_paraphrased_llama $num_paraphrased_llama \
   --num_paraphrased_gpt $num_paraphrased_gpt \
