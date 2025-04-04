@@ -5,7 +5,7 @@ This repository contains the code for our paper: **Defending LLM Watermarking Ag
 ## Quick Links
 
   - [Overview](#overview)
-  - [Installation](#installation)
+  - [Getting Started](#getting-started)
   - [Semantic Mapping Model Training](#semantic-mapping-model-training)
   - [Watermarking](#watermarking)
 
@@ -18,8 +18,12 @@ In the figure below, the left side illustrates our semantic-aware watermarking f
 
 ![](figure/framework.png)
 
-## Installation
+## Getting Started
 ```bash
+# set up API key
+apikey=""
+export OPENAI_API_KEY=${apikey}
+
 # download the code
 git clone https://github.com/an1118/contrastive-watermark.git
 cd contrastive-watermark
@@ -65,7 +69,7 @@ bash contrastive_train/run_sup_example_inbatch.sh \
 ## Watermarking
 Below is the demo code that uses our contrastively fine-tuned semantic mapping model to add watermarks to the C4 dataset.
 ```bash
-embed_map_model="annnli/roberta-base-watermark-embed"
+embed_map_model="Shiyu-Lab/roberta-base-watermark-embed"
 # watermarking parameters
 watermark_data_path="https://huggingface.co/datasets/allenai/c4/resolve/1ddc917116b730e1859edef32896ec5c16be51d0/realnewslike/c4-train.00000-of-00512.json.gz"
 watermark_model="meta-llama/Llama-3.1-8B-Instruct"  # Qwen/Qwen2.5-7B-Instruct  meta-llama/Llama-3.1-8B-Instruct

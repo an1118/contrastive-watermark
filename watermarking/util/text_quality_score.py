@@ -73,7 +73,7 @@ def _judge_text_quality(original_text, paraphrased_text):
         if cur_call > 1:
             print(f"Retrying... (Attempt {cur_call})", flush=True)
         try:
-            response = call_chatgpt_api(messages, max_tokens, model='GPT-4o')
+            response = call_chatgpt_api(messages, max_tokens, model='gpt-4o')
         except RetryError as e:
             print(e, flush=True)
             continue

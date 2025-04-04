@@ -1,15 +1,15 @@
 #!/bin/bash
-
-module load cuda
-
 set -e
-repo="/blue/buyuheng/li_an.ucsb/projects/contrastive-watermark"
+
+repo=""
+apikey=""
+export OPENAI_API_KEY=${apikey}
 
 # model parameters
 model_name="cardiffnlp/twitter-roberta-base-sentiment"
 
 # training data parameters
-dataset_name="annnli/C4-contrastive-watermark"
+dataset_name="Shiyu-Lab/C4-contrastive-watermark"
 num_paraphrased_llama=8
 num_paraphrased_gpt=8
 num_sentiment_spoof=1
