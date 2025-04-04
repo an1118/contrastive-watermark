@@ -1,0 +1,12 @@
+accelerate
+transformers
+sentence-transformers
+nltk
+openai
+pandas
+datasets
+tqdm
+scipy
+torch
+wandb
+tenacity

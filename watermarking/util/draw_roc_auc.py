@@ -83,12 +83,12 @@ print('========================')
 # print(f'neg_weight={neg_weight} / margin={margin}')
 # print(f'watermrk dataset: {wm_dataset_name}')
 # result_path = f'/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/watermarking/outputs/{dataset}/{model_name}/{batch_size}batch_{num_epoch}epochs/llama{num_paraphrased_llama}-{num_negative_llama}gpt{num_paraphrased_gpt}-{num_negative_gpt}-{num_summary}/loss_cl{cl_weight}-tl{tl_weight}-wneg{neg_weight}-margin{margin}/wm-{wm_dataset_name}-alpha{alpha}-delta{delta_0}|{delta}.csv'
-result_path = r"/blue/buyuheng/li_an.ucsb/projects/watermark-simcse/watermarking/outputs/c4/twitter-roberta-base-sentiment/128batch_30epochs/llama8-0gpt8-1-0/loss_cl0.0-tl1.0-wneg999-margin1.1/wm-c4-alpha2.0-delta0.2|0.5.csv"
+result_path = r"/blue/buyuheng/li_an.ucsb/projects/contrastive-watermark/watermarking/outputs/wm-model-Llama-3.1-8B-Instruct/wm-alpha2.0-delta0.1|0.13.csv"
 print(os.path.basename(result_path))
 df = pd.read_csv(result_path)
 
 human_scores = df['human_score'].to_list()
-for type_ in ['adaptive', 'paraphrased', 'spoofing', 'latter_spoofing']:
+for type_ in ['adaptive', 'paraphrased', 'sentiment_spoofed', 'latter_sentiment_spoofed', 'hate_spoofed']:
     print(type_, end=' ')
     wm_scores = df[f'{type_}_watermarked_text_score'].to_list()
     # debug

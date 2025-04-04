@@ -1,7 +1,7 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-adaptive-text-watermark-yepeng/__pycache__/
-SimCSE/__pycache__/
+watermarking/__pycache__/
+contrastive_train/__pycache__/
 *.py[cod]
 *$py.class
 
@@ -137,3 +137,4 @@ result
 wandb
 outputs
 model
+watermarking/util
